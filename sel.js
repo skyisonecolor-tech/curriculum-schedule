@@ -16,9 +16,9 @@
   function cohortLabel(year) { const g = curGrade(year); return year + '학년도 입학생' + (g >= 1 && g <= 3 ? ' (현 ' + g + '학년)' : g < 1 ? ' (입학 예정)' : ''); }
   function semShort(s) { const p = String(s).split('-'); return p[0] + '학년 ' + p[1] + '학기'; }
 
-  function readAoa(file) {
+  async function readAoa(file) {
+    await A.needXLSX();
     return new Promise((resolve, reject) => {
-      if (!window.XLSX) { reject(new Error('엑셀 도구를 불러오지 못했습니다.')); return; }
       const fr = new FileReader();
       fr.onload = () => {
         try {
@@ -30,7 +30,8 @@
       fr.readAsArrayBuffer(file);
     });
   }
-  function writeBook(sheets, file) {
+  async function writeBook(sheets, file) {
+    try { await A.needXLSX(); } catch (e) { toast(e.message, true); return; }
     const wb = window.XLSX.utils.book_new();
     sheets.forEach((sh) => {
       const ws = window.XLSX.utils.aoa_to_sheet(sh.aoa);

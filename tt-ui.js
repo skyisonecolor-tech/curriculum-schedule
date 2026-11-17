@@ -430,6 +430,7 @@
     v.querySelector('#p5').onclick = () => printPages([{ title: '교사 시간표 일람표', caption: cap, html: matrixHtml('teacher') }], true);
     v.querySelector('#p6').onclick = () => printPages([{ title: '학급 시간표 일람표', caption: cap, html: matrixHtml('class') }], true);
     v.querySelector('#p7').onclick = () => {
+      if (!window.XLSX) { A.needXLSX(); toast('엑셀 도구를 불러오는 중입니다. 잠시 후 다시 눌러 주세요.', true); return; }
       const wb = window.XLSX.utils.book_new();
       ['teacher', 'class'].forEach((kind) => {
         const m = matrix(kind);

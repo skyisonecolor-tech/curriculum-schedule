@@ -25,8 +25,29 @@
 
   // 학교(Workspace) 계정 주소 /a/macros/도메인/s/… 는 로그인을 요구하므로 일반 주소로 바꿔 씁니다.
   function apiUrl() { return String(CFG.API_URL || '').trim().replace(/\/a\/macros\/[^/]+\/s\//, '/macros/s/'); }
-  const WEB_VERSION = '0.5.4';
+  const WEB_VERSION = '0.5.5';
+  /* 같은 화면을 오가며 같은 자료를 다시 부를 때 30초 동안은 저장본을 씀. 무언가를 저장·변경하면 저장본을 모두 비움 */
+  const READ_CACHE = new Set(['settingsGet', 'studentList', 'teacherList', 'selRounds', 'curGet', 'selStatus', 'blockList', 'blockData', 'demandData',
+    'ttVersions', 'ttView', 'ttData', 'noticeList', 'pushConfig', 'opsDay', 'opsList', 'retentionGet', 'dataCounts', 'selHome']);
+  const NO_CLEAR = new Set(['ping', 'me', 'auditList', 'backupList', 'rosterDupes', 'opsFree', 'slips', 'teacherSlips', 'rosterPreview', 'teacherUploadPreview',
+    'selUploadPreview', 'histUploadPreview', 'surveyUploadPreview', 'yearPreview', 'selGet', 'selExport']);
+  const rcache = new Map(), inflight = new Map();
+  const READ_TTL = 30000;
+  function clearReadCache() { rcache.clear(); }
   async function api(action, payload) {
+    if (READ_CACHE.has(action)) {
+      const key = MODE + '|' + action + '|' + JSON.stringify(payload || {});
+      const hit = rcache.get(key);
+      if (hit && Date.now() - hit.t < READ_TTL) return JSON.parse(hit.v);
+      if (inflight.has(key)) return JSON.parse(await inflight.get(key));
+      const p = apiRaw(action, payload).then((d) => JSON.stringify(d));
+      inflight.set(key, p);
+      try { const v = await p; rcache.set(key, { t: Date.now(), v }); return JSON.parse(v); } finally { inflight.delete(key); }
+    }
+    if (!NO_CLEAR.has(action)) clearReadCache();
+    try { return await apiRaw(action, payload); } finally { if (!NO_CLEAR.has(action)) clearReadCache(); }
+  }
+  async function apiRaw(action, payload) {
     if (!CFG.API_URL || CFG.API_URL.indexOf('http') !== 0) throw new Error('config.js에 서버 주소(API_URL)를 먼저 넣어 주세요.');
     let res;
     try {
@@ -96,8 +117,24 @@
     return close;
   }
 
+  /* ---------- 필요할 때만 불러오는 도구(엑셀 880KB·QR) ---------- */
+  const libs = {};
+  function loadLib(src) {
+    if (!libs[src]) {
+      libs[src] = new Promise((res, rej) => {
+        const s = document.createElement('script'); s.src = src; s.async = true;
+        s.onload = () => res(); s.onerror = () => { delete libs[src]; rej(new Error('도구(' + src.split('/').pop() + ')를 불러오지 못했습니다. 인터넷 연결을 확인해 주세요.')); };
+        document.head.appendChild(s);
+      });
+    }
+    return libs[src];
+  }
+  const needXLSX = () => (window.XLSX ? Promise.resolve() : loadLib('lib/xlsx.full.min.js'));
+  const needQR = () => (window.qrcode ? Promise.resolve() : loadLib('lib/qrcode.js'));
+
   /* ---------- 쪽지 인쇄 ---------- */
-  function printSlips(list, title) {
+  async function printSlips(list, title) {
+    try { await needQR(); } catch (e) { /* QR 없이 인쇄 */ }
     const school = ui.school || CFG.SCHOOL_NAME || '';
     const url = appUrl();
     let qr = '';
@@ -122,9 +159,9 @@
   const ALIAS = { 입학년도: '입학년도', 학년: '학년', 반: '반', 번호: '번호', 학번: '학번', 성명: '성명', 이름: '성명', 학생이름: '성명',
     다른이름: '다른이름', '다른이름(영문·원어)': '다른이름', 영문이름: '다른이름', 원어이름: '다른이름', 성별: '성별', 구분: '구분',
     부서: '부서', 부서명: '부서', 교과: '교과', 과목: '교과', 담당교과: '교과', 권한: '권한', 담임학년: '담임학년', 담임반: '담임반' };
-  function readSheet(file) {
+  async function readSheet(file) {
+    await needXLSX();
     return new Promise((resolve, reject) => {
-      if (!window.XLSX) { reject(new Error('엑셀 읽기 도구를 불러오지 못했습니다. 인터넷 연결을 확인해 주세요.')); return; }
       const fr = new FileReader();
       fr.onload = () => {
         try {
@@ -152,8 +189,8 @@
     teachers: { file: '교사_명단_양식.xlsx', sheet: '교사명단', head: ['성명', '부서', '교과', '권한', '담임학년', '담임반'],
       ex: [['김민준', '교무부', '수학', '교사', '2', '3'], ['이서연', '연구부', '국어', '일과담당', '', ''], ['김민준', '3학년부', '영어', '교사', '3', '1']] },
   };
-  function downloadTemplate(k) {
-    if (!window.XLSX) { toast('엑셀 도구를 불러오는 중입니다. 잠시 후 다시 눌러 주세요.', true); return; }
+  async function downloadTemplate(k) {
+    try { await needXLSX(); } catch (e) { toast(e.message, true); return; }
     const t = TEMPLATES[k];
     const ws = window.XLSX.utils.aoa_to_sheet([t.head].concat(t.ex));
     ws['!cols'] = t.head.map(() => ({ wch: 14 }));
@@ -234,6 +271,7 @@
           if (payload.deptPicked) saveDept(name, payload.dept);
         }
         S = { token: d.token, user: d.user, must: !!d.mustChangePassword }; save();
+        if (d.user && d.user.kind === 'teacher') setTimeout(() => { needXLSX().catch(() => {}); needQR().catch(() => {}); }, 1500);
         ui.classNeed = null; ui.deptNeed = null; ui.tab = null; ui.lastName = '';
         if (!S.must) await loadRounds();
         render();
@@ -836,7 +874,7 @@
         : '<div class="row"><label class="field small">학년별 반 수<input id="pc1" class="input sm" style="width:70px" value="11"></label><label class="field small">반별 인원<input id="pc2" class="input sm" style="width:70px" value="30"></label>'
           + '<button class="btn pri" id="pg" style="align-self:flex-end">연습 데이터 만들기</button></div><p class="hint">가상 학생(1·2학년)과 연습 교사 10명(teacher01~10)을 만들고, 기존 연습 데이터는 지웁니다. 쪽지는 교사 계정·학생 계정 화면에서 출력하세요.</p>')
       + '</div>'
-      + '<div class="card" style="grid-column:1/-1" id="rsbox"><div class="row"><h2>데이터 초기화</h2><button class="btn sm" id="rsl">불러오기</button></div><p class="hint">항목별로 지웁니다. 지우기 전에 자동으로 백업하며, 위의 복원으로 되돌릴 수 있습니다. 교사 계정은 교사 계정 화면에서 골라 지웁니다.</p><div id="rst"></div></div>'
+      + '<div class="card" style="grid-column:1/-1" id="rsbox"><div class="row"><h2>데이터 초기화</h2><button class="btn sm" id="rsl">불러오기</button><span style="margin-left:auto"></span><button class="btn sm" id="ccl" title="구글 시트를 직접 고친 뒤 바로 반영할 때">캐시 비우기</button></div><p class="hint">항목별로 지웁니다. 지우기 전에 자동으로 백업하며, 위의 복원으로 되돌릴 수 있습니다. 교사 계정은 교사 계정 화면에서 골라 지웁니다.</p><div id="rst"></div></div>'
       + '<div class="card" style="grid-column:1/-1"><div class="row"><h2>변경 이력</h2><button class="btn sm" id="al">불러오기</button></div><div id="alog"></div></div></div>';
     const rsl = document.getElementById('rsl');
     const loadReset = async () => {
@@ -858,6 +896,8 @@
       document.querySelectorAll('[data-rx]').forEach((b) => { const r = rows[Number(b.dataset.rx)]; b.onclick = () => resetData(r[0], r[2], r[3], loadReset); });
     };
     rsl.onclick = () => run(rsl, loadReset);
+    const ccl = document.getElementById('ccl');
+    ccl.onclick = () => run(ccl, async () => { await api('cacheClear', {}); clearReadCache(); toast('캐시를 비웠습니다. 시트에서 직접 고친 내용이 바로 반영됩니다.'); });
     const al = document.getElementById('al');
     al.onclick = () => run(al, async () => {
       const list = await api('auditList', {});
@@ -898,7 +938,7 @@
   }
 
   /* ---------- 다른 파일(sel.js)과 함께 쓰는 도구 ---------- */
-  window.APP = { api, esc, toast, run, modal, saveBlob, render, renderHome, VIEWS, isAdmin, canViewAll, CFG, resetData, confirmTyped,
+  window.APP = { api, esc, toast, run, modal, saveBlob, render, renderHome, VIEWS, isAdmin, canViewAll, CFG, resetData, confirmTyped, needXLSX, clearReadCache,
     get S() { return S; }, get ui() { return ui; }, MODE };
   async function loadRounds() {
     if (!S.user || S.user.kind !== 'student') return;
@@ -909,14 +949,20 @@
   /* ---------- 시작 ---------- */
   async function boot() {
     render();
-    if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-    try {
-      const p = await api('ping', {});
-      ui.school = p.schoolName || ''; ui.year = p.year || ''; ui.serverVersion = p.version || '';
-      if (!S.token) renderLogin();
-    } catch (e) { /* 서버 연결 실패는 로그인 시 안내 */ }
-    if (S.token) { try { const m = await api('me', {}); S.user = m.user; S.must = m.mustChangePassword; save(); if (!S.must) await loadRounds(); render(); } catch (e) { /* 처리됨 */ } }
-    else if (ui.serverVersion) render();
+    if ('serviceWorker' in navigator && location.protocol === 'https:') {
+      // 새 버전 화면 파일이 설치되면 한 번 새로고침해 바로 새 화면으로
+      const had = !!navigator.serviceWorker.controller;
+      let reloaded = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => { if (had && !reloaded) { reloaded = true; location.reload(); } });
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+    // 서버 확인과 내 정보 확인을 동시에
+    const pingP = api('ping', {}).then((p) => { ui.school = p.schoolName || ''; ui.year = p.year || ''; ui.serverVersion = p.version || ''; }).catch(() => {});
+    const meP = S.token ? api('me', {}).then((m) => { S.user = m.user; S.must = m.mustChangePassword; save(); }).catch(() => {}) : Promise.resolve();
+    await Promise.all([pingP, meP]);
+    if (S.token && !S.must) await loadRounds();
+    render();
+    if (S.user && S.user.kind === 'teacher') setTimeout(() => { needXLSX().catch(() => {}); needQR().catch(() => {}); }, 1500);
   }
   boot();
 })();

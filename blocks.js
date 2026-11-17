@@ -36,6 +36,7 @@
     return new Blob(parts.concat(central, [new Uint8Array(end.buffer)]), { type: 'application/zip' });
   }
   function bookBytes(sheets) {
+    if (!window.XLSX) { A.needXLSX(); throw new Error('엑셀 도구를 불러오는 중입니다. 잠시 후 다시 눌러 주세요.'); }
     const wb = window.XLSX.utils.book_new();
     sheets.forEach((sh) => { const ws = window.XLSX.utils.aoa_to_sheet(sh.aoa); ws['!cols'] = (sh.cols || sh.aoa[0].map(() => 12)).map((w) => ({ wch: w })); window.XLSX.utils.book_append_sheet(wb, ws, sh.name); });
     return new Uint8Array(window.XLSX.write(wb, { type: 'array', bookType: 'xlsx' }));
