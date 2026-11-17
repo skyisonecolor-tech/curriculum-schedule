@@ -3,7 +3,7 @@ window.APP_CONFIG = {
   // Apps Script를 '웹 앱'으로 배포한 뒤 받은 주소(https://script.google.com/macros/s/.../exec)를 넣으세요.
   API_URL: 'https://script.google.com/macros/s/AKfycbwL2vk3YGEl2r5njQ_ASXAoTeioFHTJZPYM5d1mbZ4rPsevzYjLY8rApNDU1IUiPqTw/exec',
   // 쪽지와 화면에 표시할 학교 이름 (서버 '학급 설정'에 학교명을 넣으면 그 값이 우선합니다)
-  SCHOOL_NAME: '[정왕고등학교]',
+  SCHOOL_NAME: '[학교명]',
   // 푸시 알림 (Firebase 콘솔 → 프로젝트 설정 → 일반 → 내 앱(웹)의 값, 클라우드 메시징 → 웹 푸시 인증서 키)
   FIREBASE: {
     apiKey: '',

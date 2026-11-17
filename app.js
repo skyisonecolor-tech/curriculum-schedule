@@ -7,7 +7,7 @@
   const ROLES = ['최종관리자', '일과담당', '수정', '조회', '교사'];
   const $app = document.getElementById('app');
   let S = load();
-  let ui = { tab: null, loginTab: 'student', classNeed: null, school: '', year: '' };
+  let ui = { tab: null, loginTab: 'student', classNeed: null, deptNeed: null, school: '', year: '' };
 
   /* ---------- 공통 ---------- */
   function load() { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { return {}; } }
@@ -100,10 +100,10 @@
     let qr = '';
     try { const q = window.qrcode(0, 'M'); q.addData(url); q.make(); qr = q.createSvgTag(3, 0); } catch (e) { qr = ''; }
     const cards = list.map((x) => {
-      const who = x.loginId ? ('선생님 · 아이디 ' + esc(x.loginId)) : (esc(x.grade) + '학년 ' + esc(x.classNo) + '반 ' + esc(x.number) + '번');
+      const who = (x.teacher || x.loginId != null) ? ('선생님' + (x.dept ? ' · ' + esc(x.dept) : '') + (x.loginId ? ' · 로그인 이름 ' + esc(x.loginId) : '')) : (esc(x.grade) + '학년 ' + esc(x.classNo) + '반 ' + esc(x.number) + '번');
       return '<div class="slip"><div class="qr">' + qr + '</div><div><div class="s">' + esc(school) + ' · 일과 알리미' + (MODE === 'practice' ? ' (연습)' : '') + '</div>'
         + '<div><strong>' + esc(x.name) + '</strong> · ' + who + '</div><div class="s">개별 코드</div><div class="c">' + esc(x.code) + '</div>'
-        + '<div class="s">' + esc(url) + '<br>처음 로그인할 때 이름(아이디)과 이 코드를 넣고, 바로 나만의 비밀번호를 정합니다. 남에게 보여주지 마세요.</div></div></div>';
+        + '<div class="s">' + esc(url) + '<br>처음 로그인할 때 이름과 이 코드를 넣고, 바로 나만의 비밀번호를 정합니다. 남에게 보여주지 마세요.</div></div></div>';
     }).join('');
     document.getElementById('print-area').innerHTML = '<h2 style="font-size:13pt">' + esc(title || '개별 코드 안내') + '</h2><div class="slips">' + cards + '</div>';
     setTimeout(() => window.print(), 50);
@@ -117,7 +117,8 @@
 
   /* ---------- 엑셀 ---------- */
   const ALIAS = { 입학년도: '입학년도', 학년: '학년', 반: '반', 번호: '번호', 학번: '학번', 성명: '성명', 이름: '성명', 학생이름: '성명',
-    다른이름: '다른이름', '다른이름(영문·원어)': '다른이름', 영문이름: '다른이름', 원어이름: '다른이름', 성별: '성별', 구분: '구분' };
+    다른이름: '다른이름', '다른이름(영문·원어)': '다른이름', 영문이름: '다른이름', 원어이름: '다른이름', 성별: '성별', 구분: '구분',
+    부서: '부서', 부서명: '부서', 교과: '교과', 과목: '교과', 담당교과: '교과', 권한: '권한', 담임학년: '담임학년', 담임반: '담임반' };
   function readSheet(file) {
     return new Promise((resolve, reject) => {
       if (!window.XLSX) { reject(new Error('엑셀 읽기 도구를 불러오지 못했습니다. 인터넷 연결을 확인해 주세요.')); return; }
@@ -145,6 +146,8 @@
     status: { file: '전출_휴학_복학_양식.xlsx', head: ['학번', '성명', '구분'], ex: [['20105', '홍길동', '전출'], ['20211', '김하늘', '휴학']] },
     freshman: { file: '신입생_명렬_양식.xlsx', head: ['반', '번호', '성명', '다른이름(영문·원어)', '성별', '학번'],
       ex: [['1', '1', '홍길동', '', '남', ''], ['1', '2', '김하늘', '', '여', '']] },
+    teachers: { file: '교사_명단_양식.xlsx', sheet: '교사명단', head: ['성명', '부서', '교과', '권한', '담임학년', '담임반'],
+      ex: [['김민준', '교무부', '수학', '교사', '2', '3'], ['이서연', '연구부', '국어', '일과담당', '', ''], ['김민준', '3학년부', '영어', '교사', '3', '1']] },
   };
   function downloadTemplate(k) {
     if (!window.XLSX) { toast('엑셀 도구를 불러오는 중입니다. 잠시 후 다시 눌러 주세요.', true); return; }
@@ -152,7 +155,7 @@
     const ws = window.XLSX.utils.aoa_to_sheet([t.head].concat(t.ex));
     ws['!cols'] = t.head.map(() => ({ wch: 14 }));
     const wb = window.XLSX.utils.book_new();
-    window.XLSX.utils.book_append_sheet(wb, ws, '명렬');
+    window.XLSX.utils.book_append_sheet(wb, ws, t.sheet || '명렬');
     saveBlob(new Blob([window.XLSX.write(wb, { type: 'array', bookType: 'xlsx' })], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), t.file);
   }
   function saveBlob(blob, name) {
@@ -185,14 +188,15 @@
       + '<form id="lf" class="card" autocomplete="on">'
       + (st
         ? '<div class="field"><label for="ln">이름</label><input id="ln" class="input" autocomplete="name" required placeholder="홍길동"><span class="hint">외국 국적 학생은 한글 이름, 영문·원어 이름 중 어느 쪽이든 됩니다.</span></div>'
-        : '<div class="field"><label for="ln">아이디</label><input id="ln" class="input" autocomplete="username" required placeholder="아이디"></div>')
+        : '<div class="field"><label for="ln">이름</label><input id="ln" class="input" autocomplete="username" required placeholder="홍길동"><span class="hint">선생님 성함을 그대로 넣습니다.</span></div>')
       + '<div class="field"><label for="lp">비밀번호</label><input id="lp" class="input" type="password" autocomplete="current-password" required placeholder="처음에는 받은 개별 코드"></div>'
       + (cls ? '<div class="field"><label for="lc">학년·반 선택</label><select id="lc" class="input">' + cls.map((o, i) => '<option value="' + i + '">' + esc(o.grade) + '학년 ' + esc(o.classNo) + '반</option>').join('') + '</select><span class="hint">같은 이름의 학생이 있어 학년·반을 한 번 더 확인합니다.</span></div>' : '')
+      + (ui.deptNeed && !st ? '<div class="field"><label for="ld">부서 선택</label><select id="ld" class="input">' + ui.deptNeed.map((o) => '<option value="' + esc(o) + '"' + (o === loadDept(ui.lastName) ? ' selected' : '') + '>' + esc(o || '(부서 없음)') + '</option>').join('') + '</select><span class="hint">같은 이름의 선생님이 있어 부서를 한 번 더 확인합니다.</span></div>' : '')
       + '<button class="btn pri big" type="submit">로그인</button></form>'
       + '<p class="hint">한 번 로그인하면 이 기기에서 계속 유지됩니다. 로그인이 안 되면 ' + (st ? '담임 선생님께' : '관리 담당 선생님께') + ' 문의하세요.</p>'
       + '<button type="button" class="btn sm" id="dgb" style="align-self:flex-start">서버 연결 점검</button>'
       + '</div></div>';
-    $app.querySelectorAll('[data-lt]').forEach((b) => { b.onclick = () => { ui.loginTab = b.dataset.lt; ui.classNeed = null; renderLogin(); }; });
+    $app.querySelectorAll('[data-lt]').forEach((b) => { b.onclick = () => { ui.loginTab = b.dataset.lt; ui.classNeed = null; ui.deptNeed = null; renderLogin(); }; });
     document.getElementById('dgb').onclick = showDiagnosis;
     const f = document.getElementById('lf');
     if (ui.lastName) document.getElementById('ln').value = ui.lastName;
@@ -200,6 +204,7 @@
       e.preventDefault();
       const name = document.getElementById('ln').value.trim();
       const secret = document.getElementById('lp').value;
+      if (ui.lastName !== name) ui.deptNeed = null;
       ui.lastName = name;
       run(f.querySelector('button[type=submit]'), async () => {
         let d;
@@ -209,14 +214,27 @@
           d = await api('studentLogin', payload);
           if (d.need === 'class') { ui.classNeed = d.options; renderLogin(); document.getElementById('lp').value = secret; toast('학년·반을 골라 주세요.'); return; }
         } else {
-          d = await api('teacherLogin', { loginId: name, secret });
+          const payload = { name, secret };
+          const ld = document.getElementById('ld');
+          if (ui.deptNeed && ld) { payload.dept = ld.value; payload.deptPicked = true; }
+          d = await api('teacherLogin', payload);
+          if (d.need === 'dept') {
+            ui.deptNeed = d.options; renderLogin(); document.getElementById('lp').value = secret;
+            toast('같은 이름의 선생님이 있습니다. 부서를 골라 주세요.'); return;
+          }
+          if (payload.deptPicked) saveDept(name, payload.dept);
         }
         S = { token: d.token, user: d.user, must: !!d.mustChangePassword }; save();
-        ui.classNeed = null; ui.tab = null; ui.lastName = '';
+        ui.classNeed = null; ui.deptNeed = null; ui.tab = null; ui.lastName = '';
         if (!S.must) await loadRounds();
         render();
       });
     };
+  }
+
+  function loadDept(name) { try { return (JSON.parse(localStorage.getItem('alimi_tdept') || '{}'))[name]; } catch (e) { return undefined; } }
+  function saveDept(name, dept) {
+    try { const m = JSON.parse(localStorage.getItem('alimi_tdept') || '{}'); m[name] = dept; localStorage.setItem('alimi_tdept', JSON.stringify(m)); } catch (e) { /* 저장 못 해도 됨 */ }
   }
 
   function renderPassword(forced) {
@@ -312,7 +330,7 @@
     me(v) {
       const u = S.user || {};
       v.innerHTML = '<div class="card" style="max-width:520px"><h2>내 정보</h2>'
-        + '<div>' + esc(u.name) + (u.kind === 'student' ? ' · ' + esc(u.grade) + '학년 ' + esc(u.classNo) + '반 ' + esc(u.number) + '번 (학번 ' + esc(u.studentNo) + ')' : ' · 아이디 ' + esc(u.loginId)) + '</div>'
+        + '<div>' + esc(u.name) + (u.kind === 'student' ? ' · ' + esc(u.grade) + '학년 ' + esc(u.classNo) + '반 ' + esc(u.number) + '번 (학번 ' + esc(u.studentNo) + ')' : (u.dept ? ' · ' + esc(u.dept) : '') + ' 선생님' + (u.loginId ? ' (로그인 이름 ' + esc(u.loginId) + ')' : '')) + '</div>'
         + '<div class="row"><button class="btn" id="cp">비밀번호 바꾸기</button></div>'
         + '<p class="hint">비밀번호를 잊으면 ' + (u.kind === 'student' ? '담임 선생님께' : '관리 담당 선생님께') + ' 초기화를 요청하세요. 새 개별 코드를 받습니다.</p></div>';
       document.getElementById('cp').onclick = () => renderPassword(false);
@@ -478,13 +496,22 @@
     v.innerHTML = '<div class="card"><div class="empty">불러오는 중…</div></div>';
     let list;
     try { list = await api('teacherList', {}); } catch (e) { v.innerHTML = '<div class="note err">' + esc(e.message) + '</div>'; return; }
-    v.innerHTML = '<div class="card"><div class="row"><h2>교사 계정</h2><span class="pill">' + list.length + '명</span><span style="margin-left:auto"></span><button class="btn pri sm" id="tn">계정 추가</button></div>'
-      + '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름</th><th>아이디</th><th>권한</th><th>담임</th><th>교과</th><th>상태</th><th>비밀번호</th><th>마지막 접속</th><th></th></tr></thead><tbody>'
-      + list.map((t) => '<tr><td>' + esc(t.name) + '</td><td>' + esc(t.loginId) + '</td><td>' + esc(t.role) + '</td><td>' + (t.homeroomGrade ? esc(t.homeroomGrade) + '-' + esc(t.homeroomClass) : '') + '</td>'
+    const pend = list.filter((t) => t.pending && t.status === '재직' && t.loginId !== 'admin');
+    v.innerHTML = '<div class="card"><div class="row"><h2>교사 계정</h2><span class="pill">' + list.length + '명</span><span style="margin-left:auto"></span>'
+      + (pend.length ? '<button class="btn sm" id="tps" title="아직 처음 로그인하지 않은 선생님의 개별 코드 쪽지를 부서 순으로 출력">코드 대기 ' + pend.length + '명 쪽지</button>' : '')
+      + '<button class="btn sm" id="tup">명단 엑셀로 올리기</button><button class="btn pri sm" id="tn">계정 추가</button></div>'
+      + '<div id="tubox" class="card" hidden></div>'
+      + '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름 (로그인)</th><th>부서</th><th>권한</th><th>담임</th><th>교과</th><th>상태</th><th>비밀번호</th><th>마지막 접속</th><th></th></tr></thead><tbody>'
+      + list.map((t) => '<tr><td>' + esc(t.name) + (t.loginId ? ' <span class="muted small">· ' + esc(t.loginId) + '</span>' : '') + (t.sameName ? ' <span class="pill warn" title="같은 이름의 선생님이 있어 로그인할 때 부서를 고릅니다">동명이인</span>' : '') + '</td>'
+        + '<td>' + esc(t.dept) + '</td><td>' + esc(t.role) + '</td><td>' + (t.homeroomGrade ? esc(t.homeroomGrade) + '-' + esc(t.homeroomClass) : '') + '</td>'
         + '<td>' + esc(t.subject) + '</td><td>' + esc(t.status) + '</td><td>' + (t.pending ? '<span class="pill warn">코드 대기</span>' : '<span class="pill ok">설정 완료</span>') + '</td>'
         + '<td class="muted">' + esc(t.lastSeen || '-') + '</td><td class="row"><button class="btn sm" data-edit="' + esc(t.id) + '">수정</button><button class="btn sm dan" data-treset="' + esc(t.id) + '">초기화</button></td></tr>').join('')
-      + '</tbody></table></div><p class="hint">권한: 최종관리자(모든 기능) · 일과담당(보강·교체 승인) · 수정(학생 선택 수정) · 조회(조회만) · 교사(본인 시간표). 담임을 지정하면 그 반 학생 비밀번호를 초기화할 수 있습니다.</p></div>';
+      + '</tbody></table></div><p class="hint">선생님은 <b>이름</b>과 비밀번호로 로그인합니다. 같은 이름의 선생님이 있으면 부서를 서로 다르게 넣어 주세요(로그인할 때 부서를 고릅니다).<br>'
+      + '권한: 최종관리자(모든 기능) · 일과담당(보강·교체 승인) · 수정(학생 선택 수정) · 조회(조회만) · 교사(본인 시간표). 담임을 지정하면 그 반 학생 비밀번호를 초기화할 수 있습니다.</p></div>';
     document.getElementById('tn').onclick = () => teacherForm(null, v);
+    const tps = document.getElementById('tps');
+    if (tps) tps.onclick = () => run(tps, async () => { const r = await api('teacherSlips', {}); printSlips(r, '선생님 개별 코드 안내'); });
+    document.getElementById('tup').onclick = () => { const bx = document.getElementById('tubox'); bx.hidden = !bx.hidden; if (!bx.hidden) teacherUpload(bx, v); };
     v.querySelectorAll('[data-edit]').forEach((b) => { b.onclick = () => teacherForm(list.find((t) => t.id === b.dataset.edit), v); });
     v.querySelectorAll('[data-treset]').forEach((b) => {
       b.onclick = () => {
@@ -492,17 +519,50 @@
         if (!confirm(t.name + ' 선생님의 비밀번호를 초기화할까요?')) return;
         run(b, async () => {
           const r = await api('teacherReset', { id: t.id });
-          showCode('새 개별 코드', r.name + ' 선생님 · 아이디 ' + r.loginId, r.code, { name: r.name, loginId: r.loginId, code: r.code });
+          showCode('새 개별 코드', r.name + ' 선생님' + (r.dept ? ' · ' + r.dept : ''), r.code, { name: r.name, dept: r.dept, loginId: r.loginId, teacher: true, code: r.code });
           teachersView(v);
         });
       };
     });
   }
+  function teacherUpload(bx, v) {
+    bx.innerHTML = '<h2>교사 명단 올리기</h2><div class="row"><button class="btn" data-t="teachers">교사 명단 양식</button>'
+      + '<span class="hint">열: 성명 · 부서 · 교과 · 권한(비우면 교사) · 담임학년 · 담임반. 같은 이름이면 부서를 다르게 적습니다.</span></div>'
+      + '<input type="file" data-file accept=".xlsx,.xls,.csv" class="input"><div data-out></div>';
+    bx.querySelector('[data-t]').onclick = () => downloadTemplate('teachers');
+    bx.querySelector('[data-file]').onchange = async (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      const out = bx.querySelector('[data-out]');
+      out.innerHTML = '<div class="empty">파일을 읽는 중…</div>';
+      let rows, d;
+      try { rows = await readSheet(file); d = await api('teacherUploadPreview', { rows }); } catch (err) { out.innerHTML = '<div class="note err">' + esc(err.message) + '</div>'; return; }
+      const sm = d.summary;
+      const label = { add: '<span class="pill ok">추가</span>', change: '<span class="pill warn">변경</span>' };
+      out.innerHTML = '<div class="muted">' + esc(file.name) + ' · ' + rows.length + '행 → 추가 ' + sm.added + ' · 변경 ' + sm.changed + ' · 같음 ' + sm.same + ' · 명단에 없음 ' + sm.missing + '</div>'
+        + (d.errors.length ? '<div class="note err"><b>고칠 곳</b><ul style="margin:4px 0 0;padding-left:18px">' + d.errors.slice(0, 30).map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul></div>' : '')
+        + (d.items.length ? '<div class="tbl-wrap" style="max-height:280px"><table class="tbl"><thead><tr><th></th><th>이름</th><th>부서</th><th>교과</th><th>권한</th><th>담임</th><th>바뀌는 항목</th></tr></thead><tbody>'
+          + d.items.map((x) => '<tr><td>' + label[x.kind] + '</td><td>' + esc(x.name) + '</td><td>' + esc(x.dept) + '</td><td>' + esc(x.subject) + '</td><td>' + esc(x.role) + '</td><td>' + esc(x.homeroom) + '</td><td class="muted">' + esc(x.diff.join(', ')) + '</td></tr>').join('')
+          + '</tbody></table></div>' : '')
+        + (d.missing.length ? '<p class="hint">명단에 없는 재직 교사 ' + d.missing.length + '명(' + esc(d.missing.slice(0, 8).map((x) => x.name).join(', ')) + (d.missing.length > 8 ? ' 등' : '') + ')은 그대로 둡니다. 전출한 분은 계정 [수정]에서 상태를 바꿔 주세요.</p>' : '')
+        + '<div class="row" style="justify-content:flex-end"><span class="hint" style="margin-right:auto">새로 추가된 선생님은 개별 코드를 받습니다.</span><button class="btn pri" data-apply ' + (d.errors.length || !(sm.added + sm.changed) ? 'disabled' : '') + '>적용</button></div>';
+      const ab = out.querySelector('[data-apply]');
+      ab.onclick = () => run(ab, async () => {
+        const r = await api('teacherUploadApply', { rows });
+        await teachersView(v);
+        const nb = document.getElementById('tubox'); nb.hidden = false;
+        nb.innerHTML = '<div class="note ok">적용했습니다. 추가 ' + r.summary.added + ' · 변경 ' + r.summary.changed + '</div>'
+          + (r.issued.length ? '<div class="row"><span class="muted">새로 개별 코드를 받은 선생님 ' + r.issued.length + '명 — 나중에 [코드 대기 쪽지]로 다시 출력할 수 있습니다.</span><button class="btn pri" data-ps>코드 쪽지 출력</button></div>' : '');
+        const ps = nb.querySelector('[data-ps]'); if (ps) ps.onclick = () => printSlips(r.issued, '선생님 개별 코드 안내');
+      });
+    };
+  }
   function teacherForm(t, v) {
     t = t || {};
+    const isAdmin = t.loginId === 'admin';
     modal('<h2>' + (t.id ? '교사 계정 수정' : '교사 계정 추가') + '</h2>'
-      + '<div class="field"><label for="tf1">이름</label><input id="tf1" class="input" value="' + esc(t.name) + '"></div>'
-      + '<div class="field"><label for="tf2">아이디 (영문 소문자·숫자)</label><input id="tf2" class="input" value="' + esc(t.loginId) + '" ' + (t.loginId === 'admin' ? 'readonly' : '') + '></div>'
+      + '<div class="field"><label for="tf1">이름 (로그인할 때 쓰는 이름)</label><input id="tf1" class="input" value="' + esc(t.name) + '"></div>'
+      + '<div class="field"><label for="tf8">부서</label><input id="tf8" class="input" value="' + esc(t.dept) + '" placeholder="예: 교무부, 3학년부"><span class="hint">같은 이름의 선생님이 있으면 꼭 넣어 주세요. 로그인할 때 이 부서를 고릅니다.</span></div>'
+      + (isAdmin ? '<p class="hint">기본 관리자 계정은 이름 대신 <b>admin</b>으로도 로그인할 수 있습니다.</p>' : '')
       + '<div class="field"><label for="tf3">권한</label><select id="tf3" class="input">' + ROLES.map((r) => '<option ' + (r === (t.role || '교사') ? 'selected' : '') + '>' + r + '</option>').join('') + '</select></div>'
       + '<div class="row"><label class="field">담임 학년<input id="tf4" class="input sm" style="width:70px" value="' + esc(t.homeroomGrade) + '"></label>'
       + '<label class="field">담임 반<input id="tf5" class="input sm" style="width:70px" value="' + esc(t.homeroomClass) + '"></label>'
@@ -513,11 +573,11 @@
       const sb = bg.querySelector('#tfs');
       sb.onclick = () => run(sb, async () => {
         const st = bg.querySelector('#tf7');
-        const payload = { id: t.id, name: bg.querySelector('#tf1').value.trim(), loginId: bg.querySelector('#tf2').value.trim(), role: bg.querySelector('#tf3').value,
+        const payload = { id: t.id, name: bg.querySelector('#tf1').value.trim(), dept: bg.querySelector('#tf8').value.trim(), role: bg.querySelector('#tf3').value,
           homeroomGrade: bg.querySelector('#tf4').value.trim(), homeroomClass: bg.querySelector('#tf5').value.trim(), subject: bg.querySelector('#tf6').value.trim(), status: st ? st.value : '' };
         const r = await api('teacherSave', payload);
         close();
-        if (r.code) showCode('교사 계정을 만들었습니다', payload.name + ' 선생님 · 아이디 ' + payload.loginId, r.code, { name: payload.name, loginId: payload.loginId, code: r.code });
+        if (r.code) showCode('교사 계정을 만들었습니다', payload.name + ' 선생님' + (payload.dept ? ' · ' + payload.dept : ''), r.code, { name: payload.name, dept: payload.dept, teacher: true, code: r.code });
         else toast('저장했습니다.');
         teachersView(v);
       });
@@ -532,7 +592,7 @@
         : '<div class="note">백업·복원은 실제 모드에서 사용합니다.</div>') + '</div>'
       + '<div class="card"><h2>연습 모드</h2>'
       + (MODE === 'real'
-        ? '<p class="hint">실제 데이터와 완전히 분리된 연습용 공간입니다. 선생님 연수나 시범 운영에 쓰세요. 화면 위에 주황색 띠가 표시됩니다.</p><div class="row"><a class="btn" href="' + esc(practiceUrl) + '" target="_blank" rel="noopener">연습 모드 열기</a></div><p class="hint">연습 모드의 관리자 계정은 따로입니다. 아이디 admin, 처음 비밀번호는 설치할 때 정한 ADMIN_INIT_CODE입니다.</p>'
+        ? '<p class="hint">실제 데이터와 완전히 분리된 연습용 공간입니다. 선생님 연수나 시범 운영에 쓰세요. 화면 위에 주황색 띠가 표시됩니다.</p><div class="row"><a class="btn" href="' + esc(practiceUrl) + '" target="_blank" rel="noopener">연습 모드 열기</a></div><p class="hint">연습 모드의 관리자 계정은 따로입니다. 이름 칸에 admin, 처음 비밀번호는 설치할 때 정한 ADMIN_INIT_CODE입니다.</p>'
         : '<div class="row"><label class="field small">학년별 반 수<input id="pc1" class="input sm" style="width:70px" value="11"></label><label class="field small">반별 인원<input id="pc2" class="input sm" style="width:70px" value="30"></label>'
           + '<button class="btn pri" id="pg" style="align-self:flex-end">연습 데이터 만들기</button></div><p class="hint">가상 학생(1·2학년)과 연습 교사 10명(teacher01~10)을 만들고, 기존 연습 데이터는 지웁니다. 쪽지는 교사 계정·학생 계정 화면에서 출력하세요.</p>')
       + '</div>'
