@@ -1,0 +1,83 @@
+:root {
+  --ink: #1B1F24; --mut: #57606A; --bd: #D8DEE4; --bg: #F4F6F8; --card: #FFFFFF;
+  --pri: #2457C5; --pri-d: #1A3F94; --pri-s: #E8EEFB;
+  --ok: #1A6E43; --ok-s: #E7F5EC; --warn: #9A4A06; --warn-s: #FFF4E5; --err: #B42318; --err-s: #FDECEA;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: 'Noto Sans KR', 'Malgun Gothic', system-ui, sans-serif; font-size: 15px; }
+button, input, select, textarea { font: inherit; color: inherit; }
+a { color: var(--pri); }
+h1 { font-size: 22px; margin: 0; } h2 { font-size: 16px; margin: 0; }
+.muted { color: var(--mut); font-size: 13px; }
+.small { font-size: 12.5px; }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 0 14px; border-radius: 8px;
+  border: 1px solid #C9D1D9; background: #FFF; cursor: pointer; font-size: 14px; font-weight: 500; text-decoration: none; color: var(--ink); white-space: nowrap; }
+.btn:hover { background: #F6F8FA; }
+.btn.pri { background: var(--pri); border-color: var(--pri); color: #FFF; }
+.btn.pri:hover { background: var(--pri-d); }
+.btn.dan { color: var(--err); border-color: #E9B4AE; }
+.btn.sm { min-height: 34px; padding: 0 10px; font-size: 13px; }
+.btn:disabled { opacity: .55; cursor: not-allowed; }
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field label, .lbl { font-size: 13px; font-weight: 700; }
+.input, select.input { min-height: 44px; border: 1px solid #C9D1D9; border-radius: 9px; padding: 0 12px; background: #FFF; width: 100%; }
+.input.sm { min-height: 36px; padding: 0 8px; width: auto; }
+.hint { font-size: 12px; color: var(--mut); line-height: 1.5; }
+.pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 500; background: #EEF1F4; color: var(--mut); white-space: nowrap; }
+.pill.pri { background: var(--pri-s); color: var(--pri); } .pill.ok { background: var(--ok-s); color: var(--ok); }
+.pill.warn { background: var(--warn-s); color: var(--warn); } .pill.err { background: var(--err-s); color: var(--err); }
+.note { border-radius: 10px; padding: 10px 12px; font-size: 13px; line-height: 1.55; background: var(--pri-s); color: var(--pri-d); }
+.note.warn { background: var(--warn-s); color: var(--warn); } .note.err { background: var(--err-s); color: var(--err); } .note.ok { background: var(--ok-s); color: var(--ok); }
+.card { background: var(--card); border: 1px solid var(--bd); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; align-items: start; }
+.tbl-wrap { overflow: auto; border: 1px solid var(--bd); border-radius: 10px; max-height: 60vh; }
+table.tbl { width: 100%; border-collapse: collapse; background: #FFF; font-size: 13.5px; }
+.tbl th { position: sticky; top: 0; background: #F8FAFB; text-align: left; font-size: 12.5px; color: var(--mut); padding: 8px 10px; border-bottom: 1px solid var(--bd); white-space: nowrap; }
+.tbl td { padding: 7px 10px; border-bottom: 1px solid #EEF1F4; vertical-align: middle; }
+
+/* 로그인 */
+.center { min-height: 100vh; display: flex; align-items: flex-start; justify-content: center; padding: 48px 16px 24px; }
+.login { width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 16px; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; background: #E6EAEE; border-radius: 10px; padding: 3px; gap: 3px; }
+.seg button { border: none; background: transparent; border-radius: 8px; min-height: 40px; font-weight: 700; color: var(--mut); cursor: pointer; }
+.seg button.on { background: #FFF; color: var(--ink); }
+.big { min-height: 50px; font-size: 16px; font-weight: 700; width: 100%; }
+
+/* 앱 */
+.top { background: #FFF; border-bottom: 1px solid var(--bd); display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 16px; position: sticky; top: 0; z-index: 5; }
+.brand { font-weight: 700; font-size: 16px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 2px; }
+.tabs button { border: none; background: transparent; border-radius: 7px; min-height: 36px; padding: 0 11px; font-size: 14px; font-weight: 700; color: var(--ink); cursor: pointer; }
+.tabs button.on { background: var(--pri-s); color: var(--pri-d); }
+.who { margin-left: auto; font-size: 13px; color: var(--mut); display: flex; gap: 10px; align-items: center; }
+.main { max-width: 1180px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.practice { background: #C25E00; color: #FFF; text-align: center; font-size: 13px; font-weight: 700; padding: 6px; }
+.empty { text-align: center; padding: 28px 12px; color: var(--mut); }
+
+#toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: #FFF; padding: 10px 16px; border-radius: 10px;
+  font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .2s; max-width: 90vw; z-index: 50; }
+#toast.show { opacity: 1; }
+#toast.err { background: var(--err); }
+.modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 40; }
+.modal { background: #FFF; border-radius: 14px; padding: 20px; max-width: 420px; width: 100%; display: flex; flex-direction: column; gap: 12px; }
+.code { font-family: Consolas, 'Courier New', monospace; font-size: 26px; font-weight: 700; letter-spacing: 2px; text-align: center; background: #F4F6F8; border-radius: 10px; padding: 12px; }
+
+/* 쪽지 인쇄 */
+#print-area { display: none; }
+@media print {
+  @page { size: A4; margin: 10mm; }
+  body { background: #FFF; }
+  #app, #toast, .modal-bg { display: none !important; }
+  #print-area { display: block; }
+  .slips { display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; }
+  .slip { border: 1px dashed #555; padding: 5mm; display: flex; gap: 4mm; break-inside: avoid; font-size: 11pt; color: #000; }
+  .slip .qr svg { width: 26mm; height: 26mm; }
+  .slip .c { font-family: Consolas, 'Courier New', monospace; font-size: 17pt; font-weight: 700; letter-spacing: 1px; margin: 2mm 0; }
+  .slip .s { font-size: 8.5pt; }
+}
+@media (max-width: 640px) {
+  .who { margin-left: 0; width: 100%; justify-content: space-between; }
+  .main { padding: 12px; }
+}
