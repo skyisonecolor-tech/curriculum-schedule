@@ -23,15 +23,17 @@
   function isAdmin() { return S.user && S.user.kind === 'teacher' && S.user.role === '최종관리자'; }
   function canViewAll() { return S.user && S.user.kind === 'teacher' && ['최종관리자', '수정', '조회', '일과담당'].includes(S.user.role); }
 
+  // 학교(Workspace) 계정 주소 /a/macros/도메인/s/… 는 로그인을 요구하므로 일반 주소로 바꿔 씁니다.
+  function apiUrl() { return String(CFG.API_URL || '').trim().replace(/\/a\/macros\/[^/]+\/s\//, '/macros/s/'); }
   async function api(action, payload) {
     if (!CFG.API_URL || CFG.API_URL.indexOf('http') !== 0) throw new Error('config.js에 서버 주소(API_URL)를 먼저 넣어 주세요.');
     let res;
     try {
-      res = await fetch(CFG.API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      res = await fetch(apiUrl(), { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action, payload: payload || {}, token: S.token || '', mode: MODE }) });
-    } catch (e) { throw new Error('서버에 연결할 수 없습니다. 인터넷 연결을 확인해 주세요.'); }
+    } catch (e) { const x = new Error('서버에 연결할 수 없습니다.'); x.code = 'NET'; throw x; }
     let j;
-    try { j = await res.json(); } catch (e) { throw new Error('서버 응답을 읽을 수 없습니다.'); }
+    try { j = await res.json(); } catch (e) { const x = new Error('서버 응답을 읽을 수 없습니다.'); x.code = 'NET'; throw x; }
     if (!j.ok) {
       const e = new Error(j.message || '오류가 발생했습니다.'); e.code = j.error;
       if (j.error === 'AUTH') { clearSession(); setTimeout(render, 0); }
@@ -40,15 +42,49 @@
     }
     return j.data;
   }
+
+  /* 연결 점검: 주소 형식 → 서버까지 닿는지 → 응답을 읽을 수 있는지 차례로 확인 */
+  async function diagnose() {
+    const url = apiUrl();
+    const items = [];
+    const bad = (t) => items.push('<li class="bad">✗ ' + t + '</li>');
+    const good = (t) => items.push('<li class="good">✓ ' + t + '</li>');
+    if (/\/dev(\?|$)/.test(url)) bad('주소가 <b>…/dev</b>로 끝납니다. 이 주소는 만든 사람만 열 수 있는 시험용입니다. <b>배포 → 배포 관리</b>에 있는 <b>…/exec</b> 주소를 config.js에 넣어 주세요.');
+    if (/\/dev(\?|$)/.test(url)) return '<ul class="diag">' + items.join('') + '</ul>';
+    else if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(url)) bad('주소 모양이 웹 앱 주소(https://script.google.com/macros/s/…/exec)와 다릅니다. config.js의 주소를 다시 복사해 주세요. 앞뒤 공백이나 따옴표가 빠지지 않았는지도 확인하세요.<br><span class="muted">지금 주소: ' + esc(url) + '</span>');
+    else good('주소 형식이 맞습니다.');
+    let reach = false;
+    try { await fetch(url, { mode: 'no-cors', cache: 'no-store' }); reach = true; } catch (e) { reach = false; }
+    if (!reach) {
+      bad('script.google.com에 닿지 않습니다. 인터넷 연결을 확인하고, 학교망에서 막혀 있다면 휴대폰 데이터로 한 번 시험해 보세요.');
+    } else {
+      good('구글 서버까지는 닿습니다.');
+      let ok = false;
+      try { const r = await fetch(url, { cache: 'no-store' }); const j = await r.json(); ok = j && j.ok; } catch (e) { ok = false; }
+      if (ok) good('서버 응답을 정상으로 받았습니다. 다시 로그인해 보세요.');
+      else bad('서버가 로그인 화면을 돌려주고 있습니다. 거의 항상 <b>웹 앱 액세스 권한</b> 문제입니다.'
+        + '<ol><li>Apps Script에서 <b>배포 → 배포 관리 → 연필(수정)</b>을 누릅니다.</li>'
+        + '<li><b>액세스 권한</b>을 <b>모든 사용자</b>로 바꿉니다. (「Google 계정이 있는 모든 사용자」나 「도메인 내 사용자」가 아닙니다.)</li>'
+        + '<li><b>버전: 새 버전</b>을 고르고 <b>배포</b>를 누릅니다.</li></ol>'
+        + '「모든 사용자」가 목록에 없으면 학교 구글 관리자가 막아 둔 것입니다. 관리자에게 허용을 요청하거나, 업무용 개인 Gmail 계정으로 서버를 다시 만드세요.');
+    }
+    return '<ul class="diag">' + items.join('') + '</ul>';
+  }
+  async function showDiagnosis() {
+    const close = modal('<h2>서버 연결 점검</h2><div id="dg"><div class="empty">점검 중…</div></div><div class="row" style="justify-content:flex-end"><button class="btn pri" data-close>닫기</button></div>');
+    const html = await diagnose();
+    const box = document.getElementById('dg'); if (box) box.innerHTML = html;
+    return close;
+  }
   async function run(btn, fn) {
     if (btn) { btn.disabled = true; btn.dataset.label = btn.textContent; btn.textContent = '처리 중…'; }
-    try { return await fn(); } catch (e) { toast(e.message, true); return undefined; }
+    try { return await fn(); } catch (e) { if (e.code === 'NET') showDiagnosis(); else toast(e.message, true); return undefined; }
     finally { if (btn) { btn.disabled = false; btn.textContent = btn.dataset.label; } }
   }
-  function modal(html, onReady) {
+  function modal(html, onReady, opts) {
     const bg = document.createElement('div');
     bg.className = 'modal-bg';
-    bg.innerHTML = '<div class="modal" role="dialog" aria-modal="true">' + html + '</div>';
+    bg.innerHTML = '<div class="modal' + (opts && opts.wide ? ' wide' : '') + '" role="dialog" aria-modal="true">' + html + '</div>';
     document.body.appendChild(bg);
     const close = () => bg.remove();
     bg.addEventListener('click', (e) => { if (e.target === bg || e.target.closest('[data-close]')) close(); });
@@ -154,8 +190,10 @@
       + (cls ? '<div class="field"><label for="lc">학년·반 선택</label><select id="lc" class="input">' + cls.map((o, i) => '<option value="' + i + '">' + esc(o.grade) + '학년 ' + esc(o.classNo) + '반</option>').join('') + '</select><span class="hint">같은 이름의 학생이 있어 학년·반을 한 번 더 확인합니다.</span></div>' : '')
       + '<button class="btn pri big" type="submit">로그인</button></form>'
       + '<p class="hint">한 번 로그인하면 이 기기에서 계속 유지됩니다. 로그인이 안 되면 ' + (st ? '담임 선생님께' : '관리 담당 선생님께') + ' 문의하세요.</p>'
+      + '<button type="button" class="btn sm" id="dgb" style="align-self:flex-start">서버 연결 점검</button>'
       + '</div></div>';
     $app.querySelectorAll('[data-lt]').forEach((b) => { b.onclick = () => { ui.loginTab = b.dataset.lt; ui.classNeed = null; renderLogin(); }; });
+    document.getElementById('dgb').onclick = showDiagnosis;
     const f = document.getElementById('lf');
     if (ui.lastName) document.getElementById('ln').value = ui.lastName;
     f.onsubmit = (e) => {
@@ -175,6 +213,7 @@
         }
         S = { token: d.token, user: d.user, must: !!d.mustChangePassword }; save();
         ui.classNeed = null; ui.tab = null; ui.lastName = '';
+        if (!S.must) await loadRounds();
         render();
       });
     };
@@ -202,6 +241,7 @@
         const d = await api('setPassword', payload);
         S.token = d.token; S.must = false; save();
         toast('비밀번호를 저장했습니다.');
+        await loadRounds();
         render();
       });
     };
@@ -211,27 +251,53 @@
 
   async function logout() { try { await api('logout', {}); } catch (e) { /* 무시 */ } clearSession(); ui.tab = null; render(); }
 
-  function tabsFor() {
+  /* 메뉴: 큰 메뉴(그룹) → 작은 메뉴 */
+  function navFor() {
     const u = S.user || {};
-    if (u.kind === 'student') return [['tt', '시간표'], ['sel', '수강신청'], ['me', '내 정보']];
-    const t = [['tt', '시간표']];
-    if (u.homeroom) t.push(['myclass', '우리 반']);
-    if (canViewAll()) t.push(['accounts', '학생 계정']);
-    if (isAdmin()) t.push(['settings', '학급 설정'], ['roster', '명렬'], ['freshman', '신입생'], ['teachers', '교사 계정'], ['data', '데이터']);
-    t.push(['me', '내 정보']);
-    return t;
+    const G = [];
+    if (u.kind === 'student') {
+      G.push({ id: 'tt', label: '시간표', subs: [['tt', '시간표']] });
+      if ((S.rounds || []).length) G.push({ id: 'sel', label: '수강신청', subs: [['sel', '수강신청']] });
+      G.push({ id: 'noti', label: '알림', subs: [['notice', '알림']] });
+      G.push({ id: 'me', label: '내 정보', subs: [['me', '내 정보']] });
+      return G;
+    }
+    const tt = [['tt', '시간표'], ['ops', '일과 운영'], ['ttprint', '출력']];
+    if (isAdmin()) tt.push(['ttbuild', '시간표 편성']);
+    G.push({ id: 'ttg', label: '시간표', subs: tt });
+    G.push({ id: 'noti', label: '알림', subs: [['notice', '알림']] });
+    const sel = [];
+    if (canViewAll() || u.homeroom) sel.push(['selstatus', '신청 현황']);
+    if (isAdmin()) sel.push(['rounds', '신청 회차'], ['curriculum', '교육과정'], ['upload', '업로드'], ['blocks', '블록 편성'], ['demand', '교원소요']);
+    if (sel.length) G.push({ id: 'selg', label: '수강신청', subs: sel });
+    const people = [];
+    if (u.homeroom) people.push(['myclass', '우리 반']);
+    if (canViewAll()) people.push(['accounts', '학생 계정']);
+    if (isAdmin()) people.push(['roster', '명렬'], ['freshman', '신입생']);
+    if (people.length) G.push({ id: 'people', label: '학생', subs: people });
+    if (isAdmin()) G.push({ id: 'admin', label: '관리', subs: [['settings', '학급 설정'], ['teachers', '교사 계정'], ['data', '데이터'], ['year', '학년도 전환']] });
+    G.push({ id: 'me', label: '내 정보', subs: [['me', '내 정보']] });
+    return G;
   }
 
   function renderHome() {
-    const tabs = tabsFor();
-    if (!ui.tab || !tabs.some((t) => t[0] === ui.tab)) ui.tab = tabs[0][0];
+    const groups = navFor();
+    const all = [];
+    groups.forEach((g) => g.subs.forEach((x) => all.push([x[0], g.id])));
+    if (!ui.tab || !all.some((t) => t[0] === ui.tab)) ui.tab = all[0][0];
+    const grp = groups.find((g) => g.subs.some((x) => x[0] === ui.tab));
     const u = S.user || {};
     const who = u.kind === 'student' ? (esc(u.name) + ' · ' + esc(u.grade) + '학년 ' + esc(u.classNo) + '반 ' + esc(u.number) + '번')
       : (esc(u.name) + ' 선생님' + (u.role && u.role !== '교사' ? ' · ' + esc(u.role) : '') + (u.homeroom ? ' · ' + esc(u.homeroom.grade) + '-' + esc(u.homeroom.classNo) + ' 담임' : ''));
-    $app.innerHTML = banner() + '<header class="top"><span class="brand">일과 알리미</span><nav class="tabs" aria-label="메뉴">'
-      + tabs.map((t) => '<button type="button" data-tab="' + t[0] + '" class="' + (ui.tab === t[0] ? 'on' : '') + '">' + t[1] + '</button>').join('')
-      + '</nav><div class="who"><span>' + who + '</span><button class="btn sm" id="lo">로그아웃</button></div></header><main class="main" id="view"></main>';
-    $app.querySelectorAll('[data-tab]').forEach((b) => { b.onclick = () => { ui.tab = b.dataset.tab; renderHome(); }; });
+    const top = groups.map((g) => '<button type="button" data-grp="' + g.id + '"' + (g.subs.length === 1 ? ' data-tab="' + g.subs[0][0] + '"' : '')
+      + ' class="' + (g === grp ? 'on' : '') + '">' + g.label + '</button>').join('');
+    const sub = grp.subs.length > 1 ? '<nav class="subtabs" aria-label="' + esc(grp.label) + ' 메뉴">' + grp.subs.map((x) => '<button type="button" data-tab="' + x[0] + '" class="' + (ui.tab === x[0] ? 'on' : '') + '">' + x[1] + '</button>').join('') + '</nav>' : '';
+    $app.innerHTML = banner() + '<header class="top"><span class="brand">일과 알리미</span><nav class="tabs" aria-label="메뉴">' + top
+      + '</nav><div class="who"><span>' + who + '</span><button class="btn sm" id="lo">로그아웃</button></div></header>' + sub + '<main class="main" id="view"></main>';
+    $app.querySelectorAll('[data-grp]').forEach((b) => {
+      b.onclick = () => { const g = groups.find((x) => x.id === b.dataset.grp); ui.tab = (g.subs.find((x) => x[0] === ui.lastSub && ui.lastSub) || g.subs[0])[0]; renderHome(); };
+    });
+    $app.querySelectorAll('.subtabs [data-tab]').forEach((b) => { b.onclick = () => { ui.tab = b.dataset.tab; ui.lastSub = b.dataset.tab; renderHome(); }; });
     document.getElementById('lo').onclick = logout;
     const v = document.getElementById('view');
     const fn = VIEWS[ui.tab];
@@ -242,9 +308,6 @@
   const VIEWS = {
     tt(v) {
       v.innerHTML = '<div class="card"><h2>시간표</h2><div class="empty">시간표는 다음 단계(블록 편성·시간표)를 마치면 이곳에 표시됩니다.<br>바뀐 수업은 알림으로도 알려 드립니다.</div></div>';
-    },
-    sel(v) {
-      v.innerHTML = '<div class="card"><h2>수강신청</h2><div class="empty">지금은 신청 기간이 아닙니다.<br>신청 기간이 열리면 이 메뉴에서 과목을 고를 수 있습니다.</div></div>';
     },
     me(v) {
       const u = S.user || {};
@@ -513,6 +576,15 @@
     loadList();
   }
 
+  /* ---------- 다른 파일(sel.js)과 함께 쓰는 도구 ---------- */
+  window.APP = { api, esc, toast, run, modal, saveBlob, render, renderHome, VIEWS, isAdmin, canViewAll, CFG,
+    get S() { return S; }, get ui() { return ui; }, MODE };
+  async function loadRounds() {
+    if (!S.user || S.user.kind !== 'student') return;
+    try { S.rounds = await api('selHome', {}); save(); } catch (e) { /* 무시 */ }
+  }
+  APP.loadRounds = loadRounds;
+
   /* ---------- 시작 ---------- */
   async function boot() {
     render();
@@ -522,7 +594,7 @@
       ui.school = p.schoolName || ''; ui.year = p.year || '';
       if (!S.token) renderLogin();
     } catch (e) { /* 서버 연결 실패는 로그인 시 안내 */ }
-    if (S.token) { try { const m = await api('me', {}); S.user = m.user; S.must = m.mustChangePassword; save(); render(); } catch (e) { /* 처리됨 */ } }
+    if (S.token) { try { const m = await api('me', {}); S.user = m.user; S.must = m.mustChangePassword; save(); if (!S.must) await loadRounds(); render(); } catch (e) { /* 처리됨 */ } }
   }
   boot();
 })();
