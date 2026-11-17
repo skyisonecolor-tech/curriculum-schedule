@@ -25,7 +25,7 @@
 
   // 학교(Workspace) 계정 주소 /a/macros/도메인/s/… 는 로그인을 요구하므로 일반 주소로 바꿔 씁니다.
   function apiUrl() { return String(CFG.API_URL || '').trim().replace(/\/a\/macros\/[^/]+\/s\//, '/macros/s/'); }
-  const WEB_VERSION = '0.5.2';
+  const WEB_VERSION = '0.5.3';
   async function api(action, payload) {
     if (!CFG.API_URL || CFG.API_URL.indexOf('http') !== 0) throw new Error('config.js에 서버 주소(API_URL)를 먼저 넣어 주세요.');
     let res;
@@ -146,7 +146,7 @@
   const TEMPLATES = {
     roster: { file: '명렬_업로드_양식.xlsx', head: ['입학년도', '학년', '반', '번호', '학번', '성명', '다른이름(영문·원어)', '성별'],
       ex: [['2025', '2', '1', '1', '20101', '홍길동', '', '남'], ['2025', '2', '1', '2', '20102', '박해림', 'PIAOHAILIN', '여']] },
-    status: { file: '전출_휴학_복학_양식.xlsx', head: ['학번', '성명', '구분'], ex: [['20105', '홍길동', '전출'], ['20211', '김하늘', '휴학']] },
+    status: { file: '전출_휴학_복학_양식.xlsx', head: ['학번', '성명', '구분'], ex: [['20105', '홍길동', '전출'], ['20211', '김하늘', '휴학'], ['20307', '이바다', '자퇴']] },
     freshman: { file: '신입생_명렬_양식.xlsx', head: ['반', '번호', '성명', '다른이름(영문·원어)', '성별', '학번'],
       ex: [['1', '1', '홍길동', '', '남', ''], ['1', '2', '김하늘', '', '여', '']] },
     teachers: { file: '교사_명단_양식.xlsx', sheet: '교사명단', head: ['성명', '부서', '교과', '권한', '담임학년', '담임반'],
@@ -359,23 +359,56 @@
     data: dataView,
   };
 
+  const LEFT = ['전출', '자퇴', '퇴학'];
+  const ST_PILL = { 재학: 'ok', 휴학: 'warn', 미정: '', 전출: 'err', 자퇴: 'err', 퇴학: 'err' };
+  function stActs(st) {
+    if (st === '재학') return ['전출', '휴학', '자퇴', '퇴학'];
+    if (st === '휴학') return ['복학', '전출', '자퇴', '퇴학'];
+    if (LEFT.includes(st)) return ['재입학'];
+    return [];
+  }
+  const today = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
   async function classAccounts(v, grade, classNo, own) {
     v.innerHTML = '<div class="card"><div class="empty">불러오는 중…</div></div>';
     let d;
     try { d = await api('studentList', { grade, classNo }); } catch (e) { v.innerHTML = '<div class="note err">' + esc(e.message) + '</div>'; return; }
-    const pend = d.students.filter((s) => s.pending).length;
+    const cur = d.students.filter((s) => !LEFT.includes(s.status));
+    const left = d.students.filter((s) => LEFT.includes(s.status));
+    const showLeft = !!ui.showLeft;
+    const shown = showLeft ? d.students : cur;
+    const pend = cur.filter((s) => s.pending && s.status !== '미정').length;
+    const cols = 5 + (d.canReset ? 1 : 0) + (d.canManage ? 1 : 0);
     v.innerHTML = '<div class="card"><div class="row"><h2>' + esc(grade) + '학년 ' + esc(classNo) + '반' + (own ? ' (우리 반)' : '') + '</h2>'
-      + '<span class="pill">' + d.students.length + '명</span><span class="pill ' + (pend ? 'warn' : 'ok') + '">비밀번호 미설정 ' + pend + '명</span>'
-      + '<span style="margin-left:auto"></span>' + (d.canReset && pend ? '<button class="btn sm" id="sl">미설정 학생 쪽지 출력</button>' : '') + '</div>'
-      + '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>번호</th><th>이름</th><th>상태</th><th>비밀번호</th><th>마지막 접속</th>' + (d.canReset ? '<th></th>' : '') + '</tr></thead><tbody>'
-      + (d.students.length ? d.students.map((s) => '<tr><td>' + esc(s.number) + '</td><td>' + esc(s.name || '(이름 미정)') + (s.altName ? ' <span class="muted">' + esc(s.altName) + '</span>' : '') + '</td>'
-        + '<td>' + esc(s.status) + '</td><td>' + (s.pending ? '<span class="pill warn">코드 대기</span>' : '<span class="pill ok">설정 완료</span>') + '</td>'
-        + '<td class="muted">' + esc(s.lastSeen || '-') + '</td>'
-        + (d.canReset ? '<td>' + (s.status === '미정' ? '' : '<button class="btn sm dan" data-reset="' + esc(s.id) + '" data-name="' + esc(s.name) + '">초기화</button>') + '</td>' : '') + '</tr>').join('')
-        : '<tr><td colspan="6" class="empty">학생이 없습니다.</td></tr>')
-      + '</tbody></table></div><p class="hint">초기화하면 그 학생의 비밀번호가 지워지고 새 개별 코드가 발급됩니다. 기존 로그인도 끊깁니다.</p></div>';
+      + '<span class="pill">' + cur.length + '명</span>' + (cur.some((s) => s.status === '휴학') ? '<span class="pill warn">휴학 ' + cur.filter((s) => s.status === '휴학').length + '</span>' : '')
+      + '<span class="pill ' + (pend ? 'warn' : 'ok') + '">비밀번호 미설정 ' + pend + '명</span>'
+      + (left.length ? '<label class="row small"><input type="checkbox" id="slf"' + (showLeft ? ' checked' : '') + '> 전출·자퇴 ' + left.length + '명 보기</label>' : '')
+      + '<span style="margin-left:auto"></span>' + (d.canReset && pend ? '<button class="btn sm" id="sl">미설정 학생 쪽지 출력</button>' : '')
+      + (d.canManage ? '<button class="btn pri sm" id="tin">전입 학생 추가</button>' : '') + '</div>'
+      + '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>번호</th><th>이름</th><th>상태</th><th>비밀번호</th><th>마지막 접속</th>' + (d.canManage ? '<th>학적 처리</th>' : '') + (d.canReset ? '<th></th>' : '') + '</tr></thead><tbody>'
+      + (shown.length ? shown.map((s) => {
+        const gone = LEFT.includes(s.status);
+        const acts = stActs(s.status);
+        return '<tr' + (gone ? ' class="muted"' : '') + '><td>' + esc(s.number) + '</td><td>' + esc(s.name || '(이름 미정)') + (s.altName ? ' <span class="muted">' + esc(s.altName) + '</span>' : '') + '</td>'
+          + '<td><span class="pill ' + (ST_PILL[s.status] || '') + '">' + esc(s.status) + '</span>' + (s.status !== '재학' && s.changedAt ? ' <span class="muted small">' + esc(String(s.changedAt).slice(0, 10)) + '</span>' : '') + '</td>'
+          + '<td>' + (gone || s.status === '미정' ? '-' : s.pending ? '<span class="pill warn">코드 대기</span>' : '<span class="pill ok">설정 완료</span>') + '</td>'
+          + '<td class="muted">' + esc(s.lastSeen || '-') + '</td>'
+          + (d.canManage ? '<td>' + (acts.length ? '<select class="input sm" data-st="' + esc(s.id) + '" aria-label="' + esc(s.name) + ' 학적 처리"><option value="">처리…</option>' + acts.map((x) => '<option>' + x + '</option>').join('') + '</select>' : '') + '</td>' : '')
+          + (d.canReset ? '<td>' + (s.status === '미정' || gone ? '' : '<button class="btn sm dan" data-reset="' + esc(s.id) + '" data-name="' + esc(s.name) + '">초기화</button>') + '</td>' : '') + '</tr>';
+      }).join('') : '<tr><td colspan="' + cols + '" class="empty">학생이 없습니다.</td></tr>')
+      + '</tbody></table></div><p class="hint">초기화하면 그 학생의 비밀번호가 지워지고 새 개별 코드가 발급됩니다. 기존 로그인도 끊깁니다.'
+      + (d.canManage ? '<br>학적 처리: 전출·자퇴·퇴학은 로그인이 막히고 수강신청·블록 편성 대상에서 빠집니다(기록은 보관 기간까지 남음). 휴학은 로그인은 되며, 복학하면 재학으로 돌아옵니다.' : '') + '</p></div>';
+    const reload = () => classAccounts(v, grade, classNo, own);
+    const slf = document.getElementById('slf'); if (slf) slf.onchange = () => { ui.showLeft = slf.checked; reload(); };
     const sl = document.getElementById('sl');
     if (sl) sl.onclick = () => run(sl, async () => { const list = await api('slips', { grade, classNo }); printSlips(list, grade + '학년 ' + classNo + '반 개별 코드'); });
+    const tin = document.getElementById('tin'); if (tin) tin.onclick = () => transferInForm(grade, classNo, cur, reload);
+    v.querySelectorAll('[data-st]').forEach((sel) => {
+      sel.onchange = () => {
+        const act = sel.value; if (!act) return; sel.value = '';
+        const s = d.students.find((x) => x.id === sel.dataset.st);
+        statusForm(s, act, grade, classNo, reload);
+      };
+    });
     v.querySelectorAll('[data-reset]').forEach((b) => {
       b.onclick = () => {
         if (!confirm(b.dataset.name + ' 학생의 비밀번호를 초기화할까요?')) return;
@@ -383,9 +416,49 @@
           const r = await api('studentReset', { studentId: b.dataset.reset });
           const s = r.student;
           showCode('새 개별 코드', s.grade + '학년 ' + s.classNo + '반 ' + s.number + '번 ' + s.name, r.code, Object.assign({}, s, { code: r.code }));
-          classAccounts(v, grade, classNo, own);
+          reload();
         });
       };
+    });
+  }
+  function statusForm(s, act, grade, classNo, reload) {
+    const what = { 전출: '다른 학교로 전출', 휴학: '휴학', 자퇴: '자퇴', 퇴학: '퇴학', 복학: '복학 (재학으로)', 재입학: '재입학 (재학으로)' }[act];
+    const out = ['전출', '자퇴', '퇴학'].includes(act);
+    modal('<h2>' + esc(grade + '학년 ' + classNo + '반 ' + s.number + '번 ' + s.name) + '</h2><p><b>' + esc(what) + '</b> 처리합니다. (지금: ' + esc(s.status) + ')</p>'
+      + '<div class="row"><label class="field">처리일<input id="sfd" type="date" class="input sm" value="' + today() + '"></label>'
+      + '<label class="field" style="flex:1">메모 (선택)<input id="sfm" class="input" maxlength="100" placeholder="예: OO고로 전출"></label></div>'
+      + (out ? '<div class="note warn">로그인이 바로 막히고, 수강신청 현황·블록 편성 대상에서 빠집니다. 잘못 처리했으면 [재입학]으로 되돌릴 수 있습니다.</div>' : '')
+      + '<div class="row" style="justify-content:flex-end"><button class="btn" data-close>취소</button><button class="btn pri" id="sfo">' + esc(act) + ' 처리</button></div>',
+    (bg, close) => {
+      const ob = bg.querySelector('#sfo');
+      ob.onclick = () => run(ob, async () => {
+        await api('studentStatus', { studentId: s.id, act, date: bg.querySelector('#sfd').value, memo: bg.querySelector('#sfm').value.trim() });
+        close(); toast(s.name + ' 학생을 ' + act + ' 처리했습니다.'); reload();
+      });
+    });
+  }
+  function transferInForm(grade, classNo, cur, reload) {
+    const nextNo = cur.reduce((m, s) => Math.max(m, Number(s.number) || 0), 0) + 1;
+    modal('<h2>' + esc(grade + '학년 ' + classNo + '반') + ' 전입 학생 추가</h2>'
+      + '<div class="row"><label class="field" style="flex:1">이름<input id="ti1" class="input" autocomplete="off"></label>'
+      + '<label class="field">성별<select id="ti3" class="input sm"><option value="">-</option><option>남</option><option>여</option></select></label></div>'
+      + '<div class="field"><label for="ti2">다른 이름 (외국 국적이면 영문·원어, 선택)</label><input id="ti2" class="input"></div>'
+      + '<div class="row"><label class="field">번호<input id="ti4" class="input sm" inputmode="numeric" placeholder="' + nextNo + '"></label>'
+      + '<label class="field">학번<input id="ti5" class="input sm" inputmode="numeric" placeholder="' + esc(grade + String(classNo).padStart(2, '0') + String(nextNo).padStart(2, '0')) + '"></label>'
+      + '<label class="field">전입일<input id="ti6" type="date" class="input sm" value="' + today() + '"></label></div>'
+      + '<div class="field"><label for="ti7">메모 (선택)</label><input id="ti7" class="input" maxlength="100" placeholder="예: OO고에서 전입"></div>'
+      + '<p class="hint">번호를 비우면 이 반 마지막 번호 다음(' + nextNo + '번), 학번을 비우면 학년·반·번호로 만듭니다. 저장하면 개별 코드가 바로 나옵니다. 수강신청·분반 배정은 해당 화면에서 이어서 해 주세요.</p>'
+      + '<div class="row" style="justify-content:flex-end"><button class="btn" data-close>취소</button><button class="btn pri" id="tis">전입 처리</button></div>',
+    (bg, close) => {
+      const sb = bg.querySelector('#tis');
+      sb.onclick = () => run(sb, async () => {
+        const r = await api('studentTransferIn', { grade, classNo, name: bg.querySelector('#ti1').value.trim(), altName: bg.querySelector('#ti2').value.trim(),
+          sex: bg.querySelector('#ti3').value, number: bg.querySelector('#ti4').value.trim(), studentNo: bg.querySelector('#ti5').value.trim(),
+          date: bg.querySelector('#ti6').value, memo: bg.querySelector('#ti7').value.trim() });
+        close(); reload();
+        const s = r.student;
+        showCode('전입 처리했습니다', s.grade + '학년 ' + s.classNo + '반 ' + s.number + '번 ' + s.name + ' (학번 ' + s.studentNo + ')', r.code, Object.assign({}, s, { code: r.code }));
+      });
     });
   }
 
@@ -459,7 +532,7 @@
       + '<div class="card"><h2>2. 반영 방식</h2>'
       + '<label class="row"><input type="radio" name="rm" value="replaceGrade" checked> <b>학년 단위 교체</b> <select id="rg" class="input sm"><option>1</option><option selected>2</option><option>3</option></select>학년 명렬을 새로 반영</label>'
       + '<label class="row"><input type="radio" name="rm" value="add"> <b>추가(전입)</b> 기존 명렬에 학생 추가</label>'
-      + '<label class="row"><input type="radio" name="rm" value="status"> <b>상태 변경</b> 전출·휴학·복학·졸업</label></div></div>'
+      + '<label class="row"><input type="radio" name="rm" value="status"> <b>상태 변경</b> 전출·휴학·복학·자퇴·퇴학·졸업</label></div></div>'
       + '<div class="card" id="rbox"><h2>3. 파일 올리기 → 미리보기 → 적용</h2><input type="file" data-file accept=".xlsx,.xls,.csv" class="input"><div data-out></div></div>';
     v.querySelectorAll('[data-t]').forEach((b) => { b.onclick = () => downloadTemplate(b.dataset.t); });
     uploadFlow(document.getElementById('rbox'), (rows) => {

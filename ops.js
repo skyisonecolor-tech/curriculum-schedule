@@ -217,12 +217,12 @@
     const draw = async () => {
       let r;
       try { r = await api('retentionGet', {}); } catch (e) { box.innerHTML = '<div class="note err">' + esc(e.message) + '</div>'; return; }
-      const L = { 졸업: '졸업생 정보', 전출: '전출생 정보', 이력: '변경 이력', 알림: '알림 기록', 변경: '보강·교체 기록' };
+      const L = { 졸업: '졸업생 정보', 전출: '전출·자퇴생 정보', 이력: '변경 이력', 알림: '알림 기록', 변경: '보강·교체 기록' };
       const due = { 졸업: r.students, 전출: '', 이력: r.logs, 알림: r.notices, 변경: r.changes };
       box.innerHTML = '<div class="row"><h2>개인정보 보관 기준</h2><span style="margin-left:auto"></span><button class="btn sm" id="rtsave">저장</button><button class="btn sm dan" id="rtrun">지금 정리</button></div>'
         + '<table class="mini edit"><thead><tr><th>자료</th><th>보관 기간</th><th>지금 지울 대상</th></tr></thead><tbody>'
-        + Object.keys(L).map((k) => '<tr><td>' + L[k] + '</td><td><input class="input sm w4" data-rt="' + k + '" value="' + r.rules[k] + '"> 일</td><td class="num">' + (k === '졸업' ? r.students + '명 (졸업·전출 합계)' : k === '전출' ? '' : (due[k] || 0) + '건') + '</td></tr>').join('')
-        + '</tbody></table><p class="hint">졸업·전출 처리한 날부터 기간이 지나면 그 학생의 계정·신청·이수 이력·분반 배정을 지웁니다. 매일 새벽 2시 백업 뒤에 자동으로 정리하며, [지금 정리]는 바로 실행합니다(실행 전 백업). 학교 개인정보 처리 방침에 맞게 기간을 정하세요.</p>';
+        + Object.keys(L).map((k) => '<tr><td>' + L[k] + '</td><td><input class="input sm w4" data-rt="' + k + '" value="' + r.rules[k] + '"> 일</td><td class="num">' + (k === '졸업' ? r.students + '명 (졸업·전출·자퇴 합계)' : k === '전출' ? '' : (due[k] || 0) + '건') + '</td></tr>').join('')
+        + '</tbody></table><p class="hint">졸업·전출·자퇴 처리한 날부터 기간이 지나면 그 학생의 계정·신청·이수 이력·분반 배정을 지웁니다. 매일 새벽 2시 백업 뒤에 자동으로 정리하며, [지금 정리]는 바로 실행합니다(실행 전 백업). 학교 개인정보 처리 방침에 맞게 기간을 정하세요.</p>';
       box.querySelector('#rtsave').onclick = (e) => run(e.target, async () => {
         const p = {}; box.querySelectorAll('[data-rt]').forEach((el) => { p[el.dataset.rt] = Number(el.value); });
         await api('retentionSave', p); toast('보관 기준을 저장했습니다.'); draw();

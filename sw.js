@@ -1,5 +1,5 @@
 // 일과 알리미 서비스 워커: 화면 파일만 저장해 두고, 데이터는 항상 서버에서 받습니다.
-const CACHE = 'alimi-shell-v7';
+const CACHE = 'alimi-shell-v8';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'rules.js', 'sel.js', 'block.js', 'blocks.js', 'block-worker.js', 'tt.js', 'ttmodel.js', 'tt-ui.js', 'tt-worker.js', 'ops.js', 'config.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
