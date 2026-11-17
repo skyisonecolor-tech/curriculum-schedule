@@ -257,3 +257,4 @@ tr.chgrow td { background: #FFF8EC; }
 table.ilr.wide td, table.ilr.wide th { white-space: normal; max-width: none; font-size: 9.5pt; padding: 3px 5px; }
 @media (max-width: 900px) { .grid-ops { grid-template-columns: 1fr; } }
 [hidden] { display: none !important; }
+.linkbtn { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; } .linkbtn:hover { color: var(--pri, #2456c7); text-decoration: underline; }

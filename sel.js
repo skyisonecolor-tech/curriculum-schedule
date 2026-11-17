@@ -8,7 +8,7 @@
   const AREA_COLOR = { 국어: '#C2410C', 수학: '#1D4ED8', 영어: '#7C3AED', 사회: '#B45309', 과학: '#047857', 체육: '#0E7490', 예술: '#BE185D', '제2외·한문·정보·교양': '#475569' };
   const AREA_SHORT = { '제2외·한문·정보·교양': '제2외·정보·교양' };
   const STATUS = { 제출: 'ok', 임시: 'warn', 확인필요: 'err', 미신청: '' };
-  const STATUS_LABEL = { 제출: '제출 완료', 임시: '임시 저장', 확인필요: '확인 필요', 미신청: '미신청', '': '미신청' };
+  const STATUS_LABEL = { 제출: '제출 완료', 임시: '임시 저장', 확인필요: '확인 필요', 참고: '참고조사', 미신청: '미신청', '': '미신청' };
   const clone = (o) => JSON.parse(JSON.stringify(o));
   const pill = (st) => '<span class="pill ' + (STATUS[st || '미신청'] || '') + '">' + esc(STATUS_LABEL[st || ''] || st) + '</span>';
   const areaDot = (a) => '<i class="adot" style="background:' + (AREA_COLOR[a] || '#94A3B8') + '"></i>';
@@ -201,7 +201,7 @@
     const u = A.S.user;
     const viewAll = A.canViewAll();
     if (!viewAll && u.homeroom) ui.stClass = String(u.homeroom.classNo);
-    v.innerHTML = '<div class="card tight"><div class="row"><select id="sr" class="input sm" aria-label="신청 회차">' + rounds.map((r) => '<option value="' + esc(r.id) + '"' + (r.id === ui.stRound ? ' selected' : '') + '>' + esc(r.name) + ' · ' + esc(r.state) + '</option>').join('') + '</select>'
+    v.innerHTML = '<div class="card tight"><div class="row"><select id="sr" class="input sm" aria-label="신청 회차">' + rounds.map((r) => '<option value="' + esc(r.id) + '"' + (r.id === ui.stRound ? ' selected' : '') + '>' + esc(r.name) + ' · ' + esc(r.kind === '참고조사' ? '참고조사' : r.state) + '</option>').join('') + '</select>'
       + '<span style="margin-left:auto"></span>' + (viewAll ? '<button class="btn sm" id="sx">엑셀 내려받기</button>' : '') + '<button class="btn sm" id="sw" hidden>1:1 교환</button></div><div id="sum"></div></div><div id="slist"></div>';
     document.getElementById('sr').onchange = (e) => { ui.stRound = e.target.value; if (viewAll) ui.stClass = ''; VIEWS.selstatus(v); };
     const sx = document.getElementById('sx');
@@ -309,7 +309,7 @@
     try { [rounds, cg] = await Promise.all([api('selRounds', {}), api('curGet', {})]); } catch (e) { failed(v, e); return; }
     v.innerHTML = '<div class="card"><div class="row"><h2>신청 회차</h2><span class="muted">학생에게 수강신청 메뉴가 열리는 기간입니다.</span><span style="margin-left:auto"></span><button class="btn pri sm" id="rn">새 회차</button></div>'
       + (rounds.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름</th><th>대상</th><th>신청 학기</th><th>기간</th><th>상태</th><th>신청·제출</th><th></th></tr></thead><tbody>'
-        + rounds.map((r) => '<tr><td><b>' + esc(r.name) + '</b></td><td>' + esc(cohortLabel(r.year)) + '</td><td class="small">' + esc(r.sems.map(semShort).join(', ')) + (r.refSems.length ? '<br><span class="muted">참고: ' + esc(r.refSems.map(semShort).join(', ')) + '</span>' : '') + '</td>'
+        + rounds.map((r) => '<tr><td><b>' + esc(r.name) + '</b>' + (r.kind === '참고조사' ? ' <span class="pill warn">참고조사</span>' : '') + '</td><td>' + esc(cohortLabel(r.year)) + '</td><td class="small">' + esc(r.sems.map(semShort).join(', ')) + (r.refSems.length ? '<br><span class="muted">참고: ' + esc(r.refSems.map(semShort).join(', ')) + '</span>' : '') + '</td>'
           + '<td class="small">' + (r.manual === '자동' ? esc(r.start) + ' ~<br>' + esc(r.end) : '수동 ' + esc(r.manual)) + '</td><td><span class="pill ' + (r.open ? 'ok' : r.state === '예정' ? 'pri' : '') + '">' + esc(r.state) + '</span></td>'
           + '<td>' + r.count + ' / ' + r.submitted + '</td><td class="row"><button class="btn sm" data-ed="' + esc(r.id) + '">수정</button><button class="btn sm dan" data-del="' + esc(r.id) + '">삭제</button></td></tr>').join('')
         + '</tbody></table></div>' : '<div class="empty">아직 회차가 없습니다. [새 회차]로 만들어 주세요.' + (cg.years.length ? '' : '<br>먼저 [교육과정]에서 입학년도별 교육과정을 등록해야 합니다.') + '</div>')
@@ -639,17 +639,29 @@
 
   VIEWS.upload = async function (v) {
     loading(v);
-    let rounds, cg;
-    try { [rounds, cg] = await Promise.all([api('selRounds', {}), api('curGet', {})]); } catch (e) { failed(v, e); return; }
+    let rounds, cg, allRounds;
+    try { [allRounds, cg] = await Promise.all([api('selRounds', {}), api('curGet', {})]); } catch (e) { failed(v, e); return; }
+    rounds = allRounds.filter((r) => r.kind !== '참고조사');
+    const surveys = allRounds.filter((r) => r.kind === '참고조사');
     v.innerHTML = '<div class="grid2">'
       + '<div class="card" id="u1"><h2>이미 받은 선택 올리기</h2><p class="hint">구글 설문·엑셀로 이미 받은 다음 학년도 선택을 신청 회차에 넣습니다. 기준을 지키면 「제출 완료」, 아니면 「확인 필요」가 되어 학생이 앱에서 고칠 수 있습니다.</p>'
       + '<div class="field"><label for="u1r">신청 회차</label><select id="u1r" class="input">' + (rounds.length ? rounds.map((r) => '<option value="' + esc(r.id) + '">' + esc(r.name) + ' · ' + esc(cohortLabel(r.year)) + '</option>').join('') : '<option value="">먼저 신청 회차를 만들어 주세요</option>') + '</select></div>'
       + '<div class="field"><label for="u1s">파일의 학기</label><select id="u1s" class="input"><option value="">자동 (머리글·교육과정으로 판단)</option></select></div>'
-      + '<div class="row"><input type="file" id="u1f" accept=".xlsx,.xls,.csv" class="input"></div><div data-out></div></div>'
+      + '<div class="row"><input type="file" id="u1f" accept=".xlsx,.xls,.csv" class="input"></div><div data-out></div>'
+      + '<div class="row small" style="margin-top:6px"><span class="muted">이 회차에 들어간 신청 내용을 모두 지우려면</span><button class="btn sm dan" id="u1z">회차 신청 초기화</button></div></div>'
       + '<div class="card" id="u2"><h2>이수 이력 올리기</h2><p class="hint">지난 학기에 실제로 들은 선택 과목(배정 내역)을 올립니다. 2학년의 3학년 선택을 검증할 때 1·2학년 이수 과목으로 쓰고, 같은 과목 중복과 교과군 학점을 계산합니다.</p>'
       + '<div class="field"><label for="u2y">대상 학생</label><select id="u2y" class="input">' + cg.years.map((y) => '<option value="' + y + '"' + (curGrade(y) === 2 ? ' selected' : '') + '>' + esc(cohortLabel(y)) + '</option>').join('') + '</select></div>'
       + '<div class="field"><label for="u2s">파일의 학기</label><select id="u2s" class="input"><option value="">자동 (머리글·교육과정으로 판단)</option>' + R.SEMS.map((s) => '<option value="' + s + '">' + semShort(s) + '</option>').join('') + '</select></div>'
-      + '<div class="row"><input type="file" id="u2f" accept=".xlsx,.xls,.csv" class="input"></div><div data-out></div></div>'
+      + '<div class="row"><input type="file" id="u2f" accept=".xlsx,.xls,.csv" class="input"></div><div data-out></div>'
+      + '<div class="row small" style="margin-top:6px"><span class="muted">위 대상 학생의 이수 이력을 모두 지우려면</span><button class="btn sm dan" id="u2z">이수 이력 초기화</button></div></div>'
+      + '<div class="card" id="u3" style="grid-column:1/-1"><h2>참고조사(수요조사) 올리기</h2>'
+      + '<p class="hint">작년에 1학년이 미리 고른 3학년 과목처럼, 확정 신청이 아닌 <b>수요 조사</b> 결과를 올립니다. 학생 메뉴에는 나오지 않고, ① 같은 학생들의 다음 신청 회차에서 미리 채워지며 ② 교원소요에서 아직 신청이 없는 학기의 인원으로 쓰이고 ③ 신청 현황에서 「참고조사」 회차로 볼 수 있습니다.</p>'
+      + '<div class="row"><label class="field">대상 학생<select id="u3y" class="input">' + cg.years.map((y) => '<option value="' + y + '"' + (curGrade(y) === 2 ? ' selected' : '') + '>' + esc(cohortLabel(y)) + '</option>').join('') + '</select></label>'
+      + '<label class="field">올릴 곳<select id="u3r" class="input"></select></label>'
+      + '<label class="field" style="flex:1">조사 이름<input id="u3n" class="input" placeholder="예: 2025 1학년 3학년 과목 수요조사"></label></div>'
+      + '<div class="field" id="u3sw"><span class="lbl">조사한 학기</span><div class="row" id="u3s"></div></div>'
+      + '<div class="row"><input type="file" id="u3f" accept=".xlsx,.xls,.csv" class="input"></div><div data-out></div>'
+      + '<div id="u3list"></div></div>'
       + '<div class="card" style="grid-column:1/-1"><h2>양식</h2><div class="row"><button class="btn sm" id="t1">세로형 양식 (학번·성명·학기·과목)</button><button class="btn sm" id="t2">이수 이력 양식 (학점·교과군 포함)</button></div>'
       + '<p class="hint">학교에서 쓰던 가로형 파일(첫 줄에 과목 이름, 학생 줄에 1·A·B 같은 표시)도 그대로 올릴 수 있습니다. 「.」 「0」 빈칸은 선택하지 않은 것으로 봅니다. 띄어쓰기·로마 숫자(Ⅰ/I) 차이는 자동으로 맞춥니다.</p></div></div>';
     v.querySelector('#t1').onclick = () => writeBook([{ name: '선택', aoa: [['학번', '성명', '학기', '과목'], ['10101', '홍길동', '2-1', '물리학'], ['10101', '홍길동', '2-1', '화학']], cols: [8, 10, 6, 20] }], '선택_업로드_양식.xlsx');
@@ -659,6 +671,51 @@
     rSel.onchange = fillSems; fillSems();
     const curCache = {};
     const getCur = async (year) => { if (!curCache[year]) curCache[year] = (await api('curGet', { year })).cur; return curCache[year]; };
+    v.querySelector('#u1z').onclick = () => { const r = rounds.find((x) => x.id === rSel.value); if (!r) return; A.resetData('「' + r.name + '」 신청 내용', 'selections', r.id); };
+    v.querySelector('#u2z').onclick = () => { const y = v.querySelector('#u2y').value; A.resetData(y + ' 입학생 이수 이력', 'history', y); };
+    // 참고조사
+    const u3y = v.querySelector('#u3y'), u3r = v.querySelector('#u3r'), u3s = v.querySelector('#u3s'), u3n = v.querySelector('#u3n');
+    const fillSurvey = () => {
+      const y = u3y.value, mine = surveys.filter((r) => r.year === y);
+      u3r.innerHTML = '<option value="">새 참고조사로</option>' + mine.map((r) => '<option value="' + esc(r.id) + '">기존: ' + esc(r.name) + ' (덮어쓰기)</option>').join('');
+      const g = curGrade(y);
+      u3s.innerHTML = R.SEMS.map((x) => '<label class="row small"><input type="checkbox" value="' + x + '"' + (x[0] === '3' ? ' checked' : '') + '> ' + semShort(x) + '</label>').join('');
+      u3n.value = y + ' 입학생 수요조사';
+      v.querySelector('#u3sw').hidden = !!u3r.value;
+      u3n.disabled = !!u3r.value;
+      v.querySelector('#u3list').innerHTML = mine.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>이 학생들의 참고조사</th><th>학기</th><th>학생 수</th><th></th></tr></thead><tbody>'
+        + mine.map((r) => '<tr><td>' + esc(r.name) + '</td><td class="small">' + esc(r.sems.map(semShort).join(', ')) + '</td><td>' + r.count + '</td><td><button class="btn sm dan" data-sz="' + esc(r.id) + '">삭제</button></td></tr>').join('') + '</tbody></table></div>' : '';
+      v.querySelectorAll('[data-sz]').forEach((b) => { const r = mine.find((x) => x.id === b.dataset.sz); b.onclick = () => A.resetData('참고조사 「' + r.name + '」', 'selections', r.id, () => VIEWS.upload(v), { dropRound: true }); });
+    };
+    u3y.onchange = fillSurvey; u3r.onchange = () => { v.querySelector('#u3sw').hidden = !!u3r.value; u3n.disabled = !!u3r.value; };
+    fillSurvey();
+    v.querySelector('#u3f').onchange = async (e) => {
+      const out = v.querySelector('#u3 [data-out]'), f = e.target.files[0]; e.target.value = '';
+      if (!f) return;
+      const year = u3y.value, roundId = u3r.value;
+      const sv = surveys.find((r) => r.id === roundId);
+      const sems = sv ? sv.sems : Array.from(u3s.querySelectorAll('input:checked')).map((x) => x.value);
+      if (!sems.length) { toast('조사한 학기를 골라 주세요.', true); return; }
+      out.innerHTML = '<div class="empty">읽는 중…</div>';
+      let info, prev;
+      const payload = () => ({ roundId, year, sems, name: u3n.value.trim(), rows: info.rows });
+      try {
+        const { aoa } = await readAoa(f);
+        const cur = await getCur(year);
+        if (!cur || !cur.subjects.length) throw new Error(year + ' 입학생 교육과정을 먼저 등록해 주세요.');
+        info = parseSelection(aoa, cur, sems);
+        if (sems.length === 1) info.rows.forEach((x) => { if (!x.학기) x.학기 = sems[0]; });
+        prev = await api('surveyUploadPreview', payload());
+      } catch (err) { out.innerHTML = '<div class="note err">' + esc(err.message) + '</div>'; return; }
+      out.innerHTML = '<div class="muted">' + esc(f.name) + '</div>' + parseInfoHtml(info)
+        + '<div class="row"><span class="pill pri">학생 ' + prev.students + '명</span>' + (prev.replaced ? '<span class="pill warn">기존 조사 덮어씀 ' + prev.replaced + '</span>' : '') + '<span class="pill">기준 확인 필요 ' + prev.check + ' (참고용이라 그대로 저장)</span></div>'
+        + (prev.unknown.length ? '<div class="note warn">교육과정에 없는 과목: ' + esc(prev.unknown.join(', ')) + '</div>' : '')
+        + (prev.ignoredSems.length ? '<div class="muted small">고르지 않은 학기라 건너뜀: ' + esc(prev.ignoredSems.join(', ')) + '</div>' : '')
+        + unmatchedHtml(prev)
+        + '<div class="row" style="justify-content:flex-end"><span class="hint" style="margin-right:auto">적용 전에 자동 백업합니다.</span><button class="btn pri" data-apply' + (prev.students ? '' : ' disabled') + '>적용</button></div>';
+      const ab = out.querySelector('[data-apply]');
+      ab.onclick = () => run(ab, async () => { const res = await api('surveyUploadApply', payload()); toast('참고조사 「' + res.name + '」에 학생 ' + res.students + '명을 올렸습니다.'); VIEWS.upload(v); });
+    };
 
     v.querySelector('#u1f').onchange = async (e) => {
       const out = v.querySelector('#u1 [data-out]'), f = e.target.files[0]; e.target.value = '';

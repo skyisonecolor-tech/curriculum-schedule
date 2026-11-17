@@ -470,7 +470,7 @@
     const tok = (() => { try { return localStorage.getItem(PUSH_KEY) || ''; } catch (e) { return ''; } })();
     const perm = 'Notification' in window ? Notification.permission : 'unsupported';
     const ready = cfg.enabled && CFG.FIREBASE && CFG.FIREBASE.apiKey;
-    v.innerHTML = '<div class="grid-nt"><div class="card tight"><h2>받은 알림</h2>' + (list.length ? '<ul class="nlist">' + list.map((n) => '<li><div class="row"><b>' + esc(n.title) + '</b><span class="muted small" style="margin-left:auto">' + esc(n.time.slice(5, 16)) + ' · ' + esc(n.from) + '</span></div>' + (n.body ? '<div class="small">' + esc(n.body) + '</div>' : '') + '</li>').join('') + '</ul>' : '<div class="empty">아직 받은 알림이 없습니다.</div>') + '</div>'
+    v.innerHTML = '<div class="grid-nt"><div class="card tight"><div class="row"><h2>받은 알림</h2>' + (u.role === '최종관리자' ? '<span style="margin-left:auto"></span><button class="btn sm dan" id="nz">알림 초기화</button>' : '') + '</div>' + (list.length ? '<ul class="nlist">' + list.map((n) => '<li><div class="row"><b>' + esc(n.title) + '</b><span class="muted small" style="margin-left:auto">' + esc(n.time.slice(5, 16)) + ' · ' + esc(n.from) + '</span></div>' + (n.body ? '<div class="small">' + esc(n.body) + '</div>' : '') + '</li>').join('') + '</ul>' : '<div class="empty">아직 받은 알림이 없습니다.</div>') + '</div>'
       + '<div class="side-nt"><div class="card tight"><h3>이 기기에서 알림 받기</h3>'
       + (ready ? '<div class="row"><span class="pill ' + (tok && perm === 'granted' ? 'ok' : '') + '">' + (tok && perm === 'granted' ? '켜짐' : '꺼짐') + '</span><span style="margin-left:auto"></span>' + (tok ? '<button class="btn sm" id="pt">시험 알림</button><button class="btn sm" id="poff">끄기</button>' : '<button class="btn pri sm" id="pon">알림 켜기</button>') + '</div>'
         + '<p class="hint">시간표가 바뀌거나 공지가 오면 알려 줍니다. PC는 Edge·Chrome, 휴대폰은 「홈 화면에 추가」한 앱에서 켜 주세요. 아이폰은 iOS 16.4 이상, 홈 화면 앱에서만 됩니다.</p>'
@@ -481,6 +481,7 @@
         + (canAll ? '<option value="class:">반 고르기…</option>' : '') + '</select></div><div class="field" id="ncw" hidden><label for="nc">반 (예: 2-3)</label><input id="nc" class="input" placeholder="2-3"></div>'
         + '<div class="field"><label for="nt">제목</label><input id="nt" class="input" maxlength="60"></div><div class="field"><label for="nb">내용</label><textarea id="nb" class="input" rows="3" maxlength="400"></textarea></div>'
         + '<div class="row" style="justify-content:flex-end"><button class="btn pri" id="ns">보내기</button></div></div>' : '') + '</div></div>';
+    const nz = v.querySelector('#nz'); if (nz) nz.onclick = () => A.resetData('모든 알림 기록', 'notices', '', () => VIEWS.notice(v));
     const pon = v.querySelector('#pon');
     if (pon) pon.onclick = () => run(pon, async () => { const t = await pushToken(); await api('pushRegister', { token: t, platform: navigator.userAgent.slice(0, 60) }); try { localStorage.setItem(PUSH_KEY, t); } catch (e) { /* */ } toast('알림을 켰습니다.'); VIEWS.notice(v); });
     const pt = v.querySelector('#pt');

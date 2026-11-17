@@ -25,7 +25,7 @@
 
   // 학교(Workspace) 계정 주소 /a/macros/도메인/s/… 는 로그인을 요구하므로 일반 주소로 바꿔 씁니다.
   function apiUrl() { return String(CFG.API_URL || '').trim().replace(/\/a\/macros\/[^/]+\/s\//, '/macros/s/'); }
-  const WEB_VERSION = '0.5.3';
+  const WEB_VERSION = '0.5.4';
   async function api(action, payload) {
     if (!CFG.API_URL || CFG.API_URL.indexOf('http') !== 0) throw new Error('config.js에 서버 주소(API_URL)를 먼저 넣어 주세요.');
     let res;
@@ -377,18 +377,22 @@
     const showLeft = !!ui.showLeft;
     const shown = showLeft ? d.students : cur;
     const pend = cur.filter((s) => s.pending && s.status !== '미정').length;
-    const cols = 5 + (d.canReset ? 1 : 0) + (d.canManage ? 1 : 0);
+    const sel = d.canReset || d.canManage;
+    const cols = 5 + (d.canReset ? 1 : 0) + (d.canManage ? 1 : 0) + (sel ? 1 : 0);
     v.innerHTML = '<div class="card"><div class="row"><h2>' + esc(grade) + '학년 ' + esc(classNo) + '반' + (own ? ' (우리 반)' : '') + '</h2>'
       + '<span class="pill">' + cur.length + '명</span>' + (cur.some((s) => s.status === '휴학') ? '<span class="pill warn">휴학 ' + cur.filter((s) => s.status === '휴학').length + '</span>' : '')
       + '<span class="pill ' + (pend ? 'warn' : 'ok') + '">비밀번호 미설정 ' + pend + '명</span>'
       + (left.length ? '<label class="row small"><input type="checkbox" id="slf"' + (showLeft ? ' checked' : '') + '> 전출·자퇴 ' + left.length + '명 보기</label>' : '')
       + '<span style="margin-left:auto"></span>' + (d.canReset && pend ? '<button class="btn sm" id="sl">미설정 학생 쪽지 출력</button>' : '')
       + (d.canManage ? '<button class="btn pri sm" id="tin">전입 학생 추가</button>' : '') + '</div>'
-      + '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>번호</th><th>이름</th><th>상태</th><th>비밀번호</th><th>마지막 접속</th>' + (d.canManage ? '<th>학적 처리</th>' : '') + (d.canReset ? '<th></th>' : '') + '</tr></thead><tbody>'
+      + (sel ? '<div class="row bulkbar"><span class="muted" id="scnt">학생을 골라 일괄 작업을 할 수 있습니다.</span><span style="margin-left:auto"></span>'
+        + '<button class="btn sm" data-sb="reset" disabled>비밀번호 초기화</button>' + (d.canManage ? '<button class="btn sm dan" data-sb="delete" disabled>삭제</button>' : '') + '</div>' : '')
+      + '<div class="tbl-wrap"><table class="tbl"><thead><tr>' + (sel ? '<th style="width:32px"><input type="checkbox" id="sall" aria-label="모두 선택"></th>' : '') + '<th>번호</th><th>이름</th><th>상태</th><th>비밀번호</th><th>마지막 접속</th>' + (d.canManage ? '<th>학적 처리</th>' : '') + (d.canReset ? '<th></th>' : '') + '</tr></thead><tbody>'
       + (shown.length ? shown.map((s) => {
         const gone = LEFT.includes(s.status);
         const acts = stActs(s.status);
-        return '<tr' + (gone ? ' class="muted"' : '') + '><td>' + esc(s.number) + '</td><td>' + esc(s.name || '(이름 미정)') + (s.altName ? ' <span class="muted">' + esc(s.altName) + '</span>' : '') + '</td>'
+        return '<tr' + (gone ? ' class="muted"' : '') + '>' + (sel ? '<td><input type="checkbox" data-ss="' + esc(s.id) + '" aria-label="' + esc(s.name || s.number) + ' 선택"></td>' : '')
+          + '<td>' + esc(s.number) + '</td><td>' + (d.canManage ? '<button type="button" class="linkbtn" data-edit="' + esc(s.id) + '" title="정보 고치기">' + esc(s.name || '(이름 미정)') + ' ✎</button>' : esc(s.name || '(이름 미정)')) + (s.altName ? ' <span class="muted">' + esc(s.altName) + '</span>' : '') + '</td>'
           + '<td><span class="pill ' + (ST_PILL[s.status] || '') + '">' + esc(s.status) + '</span>' + (s.status !== '재학' && s.changedAt ? ' <span class="muted small">' + esc(String(s.changedAt).slice(0, 10)) + '</span>' : '') + '</td>'
           + '<td>' + (gone || s.status === '미정' ? '-' : s.pending ? '<span class="pill warn">코드 대기</span>' : '<span class="pill ok">설정 완료</span>') + '</td>'
           + '<td class="muted">' + esc(s.lastSeen || '-') + '</td>'
@@ -396,12 +400,46 @@
           + (d.canReset ? '<td>' + (s.status === '미정' || gone ? '' : '<button class="btn sm dan" data-reset="' + esc(s.id) + '" data-name="' + esc(s.name) + '">초기화</button>') + '</td>' : '') + '</tr>';
       }).join('') : '<tr><td colspan="' + cols + '" class="empty">학생이 없습니다.</td></tr>')
       + '</tbody></table></div><p class="hint">초기화하면 그 학생의 비밀번호가 지워지고 새 개별 코드가 발급됩니다. 기존 로그인도 끊깁니다.'
+      + (d.canManage ? '<br>이름을 누르면 이름·학번·반·번호 등을 고칠 수 있습니다. 삭제는 그 학생의 신청·이수 이력·분반 배정까지 지웁니다(삭제 전 자동 백업). 학교를 떠난 학생은 삭제 대신 학적 처리(전출·자퇴)를 쓰세요.' : '')
       + (d.canManage ? '<br>학적 처리: 전출·자퇴·퇴학은 로그인이 막히고 수강신청·블록 편성 대상에서 빠집니다(기록은 보관 기간까지 남음). 휴학은 로그인은 되며, 복학하면 재학으로 돌아옵니다.' : '') + '</p></div>';
     const reload = () => classAccounts(v, grade, classNo, own);
     const slf = document.getElementById('slf'); if (slf) slf.onchange = () => { ui.showLeft = slf.checked; reload(); };
     const sl = document.getElementById('sl');
     if (sl) sl.onclick = () => run(sl, async () => { const list = await api('slips', { grade, classNo }); printSlips(list, grade + '학년 ' + classNo + '반 개별 코드'); });
     const tin = document.getElementById('tin'); if (tin) tin.onclick = () => transferInForm(grade, classNo, cur, reload);
+    v.querySelectorAll('[data-edit]').forEach((b) => { b.onclick = () => studentEditForm(d.students.find((x) => x.id === b.dataset.edit), grade, reload); });
+    if (sel) {
+      const boxes = Array.from(v.querySelectorAll('[data-ss]')), all = document.getElementById('sall');
+      const picked = () => boxes.filter((b) => b.checked).map((b) => b.dataset.ss);
+      const sync = () => {
+        const n = picked().length;
+        document.getElementById('scnt').textContent = n ? '선택 ' + n + '명' : '학생을 골라 일괄 작업을 할 수 있습니다.';
+        v.querySelectorAll('[data-sb]').forEach((b) => { b.disabled = !n; });
+        all.checked = n > 0 && n === boxes.length; all.indeterminate = n > 0 && n < boxes.length;
+      };
+      boxes.forEach((b) => { b.onchange = sync; });
+      all.onchange = () => { boxes.forEach((b) => { b.checked = all.checked; }); sync(); };
+      v.querySelectorAll('[data-sb]').forEach((b) => {
+        b.onclick = () => {
+          const ids = picked();
+          if (b.dataset.sb === 'reset') {
+            if (!confirm(ids.length + '명의 비밀번호를 초기화하고 새 개별 코드를 발급할까요?')) return;
+            run(b, async () => {
+              const r = await api('studentBulkReset', { ids });
+              await reload();
+              modal('<h2>비밀번호 초기화 ' + r.issued.length + '명</h2>' + (r.skipped.length ? '<p class="hint">건너뜀: ' + esc(r.skipped.join(', ')) + '</p>' : '')
+                + '<div class="row" style="justify-content:flex-end"><button class="btn" data-close>닫기</button>' + (r.issued.length ? '<button class="btn pri" data-print>코드 쪽지 출력</button>' : '') + '</div>',
+              (bg) => { const pb = bg.querySelector('[data-print]'); if (pb) pb.onclick = () => printSlips(r.issued, grade + '학년 ' + classNo + '반 개별 코드'); });
+            });
+          } else {
+            const nm = ids.map((id) => (d.students.find((x) => x.id === id) || {}).name || '(미정)');
+            confirmTyped(ids.length + '명 삭제', '<p>' + esc(nm.slice(0, 30).join(', ')) + (nm.length > 30 ? ' 외' : '') + '</p><p class="hint">학생 정보와 신청·이수 이력·분반 배정·로그인을 모두 지웁니다. 지우기 전에 자동으로 백업합니다.</p>', async () => {
+              const r = await api('studentDelete', { ids }); toast(r.deleted + '명을 삭제했습니다.'); reload();
+            });
+          }
+        };
+      });
+    }
     v.querySelectorAll('[data-st]').forEach((sel) => {
       sel.onchange = () => {
         const act = sel.value; if (!act) return; sel.value = '';
@@ -419,6 +457,45 @@
           reload();
         });
       };
+    });
+  }
+  /* 지우기처럼 되돌리기 어려운 작업: 「삭제」를 직접 입력해야 진행 */
+  function confirmTyped(title, bodyHtml, onOk) {
+    modal('<h2>' + esc(title) + '</h2>' + bodyHtml
+      + '<div class="field"><label for="cty">확인을 위해 <b>삭제</b>라고 입력하세요</label><input id="cty" class="input" autocomplete="off"></div>'
+      + '<div class="row" style="justify-content:flex-end"><button class="btn" data-close>취소</button><button class="btn dan" id="cto" disabled>삭제</button></div>',
+    (bg, close) => {
+      const inp = bg.querySelector('#cty'), ob = bg.querySelector('#cto');
+      inp.oninput = () => { ob.disabled = inp.value.trim() !== '삭제'; };
+      ob.onclick = () => run(ob, async () => { await onOk(); close(); });
+    });
+  }
+  /* 탭별 초기화 버튼: target·scope는 서버 dataReset 대상 */
+  function resetData(label, target, scope, after, extra) {
+    confirmTyped(label + ' 초기화', '<p>' + esc(label) + '을(를) 모두 지웁니다. 지우기 전에 자동으로 백업하며, 관리 → 데이터의 복원으로 되돌릴 수 있습니다.</p>', async () => {
+      const r = await api('dataReset', Object.assign({ target, scope, confirm: '삭제' }, extra || {}));
+      toast(label + ' ' + r.removed + '건을 지웠습니다.');
+      if (after) after(r);
+    });
+  }
+  function studentEditForm(s, grade, reload) {
+    modal('<h2>학생 정보 고치기</h2>'
+      + '<div class="row"><label class="field" style="flex:1">이름<input id="se1" class="input" value="' + esc(s.name) + '"></label>'
+      + '<label class="field">성별<select id="se3" class="input sm"><option value="">-</option><option' + (s.sex === '남' ? ' selected' : '') + '>남</option><option' + (s.sex === '여' ? ' selected' : '') + '>여</option></select></label></div>'
+      + '<div class="field"><label for="se2">다른 이름 (영문·원어)</label><input id="se2" class="input" value="' + esc(s.altName) + '"></div>'
+      + '<div class="row"><label class="field">학년<input id="se4" class="input sm w4" inputmode="numeric" value="' + esc(grade) + '"></label>'
+      + '<label class="field">반<input id="se5" class="input sm w4" inputmode="numeric" value="' + esc(s.classNo || '') + '"></label>'
+      + '<label class="field">번호<input id="se6" class="input sm w4" inputmode="numeric" value="' + esc(s.number) + '"></label>'
+      + '<label class="field">학번<input id="se7" class="input sm" inputmode="numeric" value="' + esc(s.studentNo) + '"></label></div>'
+      + '<p class="hint">학년·반을 바꾸면 그 반으로 옮겨집니다. 비밀번호와 신청 내용은 그대로입니다.</p>'
+      + '<div class="row" style="justify-content:flex-end"><button class="btn" data-close>취소</button><button class="btn pri" id="seo">저장</button></div>',
+    (bg, close) => {
+      const ob = bg.querySelector('#seo');
+      ob.onclick = () => run(ob, async () => {
+        const r = await api('studentEdit', { studentId: s.id, name: bg.querySelector('#se1').value, altName: bg.querySelector('#se2').value, sex: bg.querySelector('#se3').value,
+          grade: bg.querySelector('#se4').value, classNo: bg.querySelector('#se5').value, number: bg.querySelector('#se6').value, studentNo: bg.querySelector('#se7').value });
+        close(); toast(r.changed ? '고쳤습니다.' : '바뀐 내용이 없습니다.'); reload();
+      });
     });
   }
   function statusForm(s, act, grade, classNo, reload) {
@@ -533,10 +610,37 @@
       + '<label class="row"><input type="radio" name="rm" value="replaceGrade" checked> <b>학년 단위 교체</b> <select id="rg" class="input sm"><option>1</option><option selected>2</option><option>3</option></select>학년 명렬을 새로 반영</label>'
       + '<label class="row"><input type="radio" name="rm" value="add"> <b>추가(전입)</b> 기존 명렬에 학생 추가</label>'
       + '<label class="row"><input type="radio" name="rm" value="status"> <b>상태 변경</b> 전출·휴학·복학·자퇴·퇴학·졸업</label></div></div>'
-      + '<div class="card" id="rbox"><h2>3. 파일 올리기 → 미리보기 → 적용</h2><input type="file" data-file accept=".xlsx,.xls,.csv" class="input"><div data-out></div></div>';
+      + '<div class="card" id="rbox"><h2>3. 파일 올리기 → 미리보기 → 적용</h2><input type="file" data-file accept=".xlsx,.xls,.csv" class="input"><div data-out></div></div>'
+      + '<div class="grid2"><div class="card" id="dupbox"><div class="row"><h2>이중 등록 확인·정리</h2><button class="btn sm" id="dupf">찾기</button></div><p class="hint">학번이 같거나, 같은 반·번호이거나, 같은 반에 같은 이름인 재학생을 찾습니다. 지울 쪽을 골라 삭제하세요(먼저 등록된 학생이 위에 나옵니다).</p><div id="dupl"></div></div>'
+      + '<div class="card"><h2>명렬 초기화</h2><p class="hint">한 학년 학생을 모두 지우고 다시 올릴 때 씁니다. 그 학생들의 신청·이수 이력·분반 배정도 함께 지워집니다(자동 백업).</p>'
+      + '<div class="row"><select id="rzg" class="input sm"><option value="1">1학년</option><option value="2">2학년</option><option value="3">3학년</option><option value="all">전체 학년</option></select><button class="btn sm dan" id="rzb">이 학년 명렬 초기화</button></div>'
+      + '<p class="hint">학생 한두 명은 <b>학생 → 학생 계정</b>에서 반을 열고 고치거나 지울 수 있습니다.</p></div></div>';
+    document.getElementById('rzb').onclick = () => { const g = document.getElementById('rzg').value; resetData(g === 'all' ? '전체 학생 명렬' : g + '학년 명렬', 'students', g); };
+    const dupf = document.getElementById('dupf');
+    const loadDupes = async () => {
+      const groups = await api('rosterDupes', {});
+      const box = document.getElementById('dupl');
+      if (!groups.length) { box.innerHTML = '<div class="note ok">이중 등록된 학생이 없습니다.</div>'; return; }
+      box.innerHTML = '<div class="note warn">' + groups.length + '묶음을 찾았습니다.</div><div class="tbl-wrap" style="max-height:340px"><table class="tbl"><thead><tr><th></th><th>이유</th><th>학년-반-번호</th><th>학번</th><th>이름</th><th>비밀번호</th><th>등록·수정</th></tr></thead><tbody>'
+        + groups.map((g) => g.students.map((s, i) => '<tr><td><input type="checkbox" data-dd="' + esc(s.id) + '"' + (i > 0 ? ' checked' : '') + '></td><td class="small">' + (i === 0 ? esc(g.why) : '') + '</td><td>' + esc(s.grade + '-' + s.classNo + '-' + s.number) + '</td><td>' + esc(s.studentNo) + '</td><td>' + esc(s.name) + '</td><td>' + (s.pending ? '코드 대기' : '설정 완료') + '</td><td class="muted small">' + esc(s.changedAt || '') + '</td></tr>').join('')).join('')
+        + '</tbody></table></div><div class="row" style="justify-content:flex-end"><button class="btn dan" id="ddb">고른 학생 삭제</button></div>';
+      document.getElementById('ddb').onclick = () => {
+        const ids = Array.from(new Set(Array.from(box.querySelectorAll('[data-dd]:checked')).map((x) => x.dataset.dd)));
+        if (!ids.length) { toast('지울 학생을 골라 주세요.', true); return; }
+        confirmTyped(ids.length + '명 삭제', '<p class="hint">고른 학생과 그 학생의 신청·이수 이력·분반 배정을 지웁니다(자동 백업). 비밀번호를 이미 정한 쪽(설정 완료)은 남기는 것이 좋습니다.</p>', async () => {
+          const r = await api('studentDelete', { ids }); toast(r.deleted + '명을 삭제했습니다.'); loadDupes();
+        });
+      };
+    };
+    dupf.onclick = () => run(dupf, loadDupes);
     v.querySelectorAll('[data-t]').forEach((b) => { b.onclick = () => downloadTemplate(b.dataset.t); });
     uploadFlow(document.getElementById('rbox'), (rows) => {
       const mode = v.querySelector('input[name=rm]:checked').value;
+      const gs = Array.from(new Set(rows.map((r) => String(r.학년 || '').replace(/\D/g, '')).filter(Boolean)));
+      if (mode === 'replaceGrade' && gs.length === 1 && document.getElementById('rg').value !== gs[0]) {
+        document.getElementById('rg').value = gs[0];
+        toast('파일의 학년에 맞춰 ' + gs[0] + '학년으로 바꿨습니다.');
+      }
       return { mode, grade: document.getElementById('rg').value, rows };
     });
   }
@@ -552,7 +656,9 @@
       + '<p class="hint">반별 자리(이름 미정)를 먼저 만들어 교원소요와 1학년 시간표를 준비할 수 있습니다.</p></div>'
       + '<div class="card" id="fbox"><h2>2. 명렬이 나오면: 신입생 명렬 올리기</h2><div class="row"><button class="btn" data-t="freshman">신입생 명렬 양식</button></div>'
       + '<p class="hint">학번이 비어 있으면 반·번호로 자동 생성합니다(예: 1반 7번 → 10107). 반별 인원과 학급 수는 올린 명렬에 맞춰 자동으로 조정됩니다.</p>'
-      + '<input type="file" data-file accept=".xlsx,.xls,.csv" class="input"><div data-out></div></div></div>';
+      + '<input type="file" data-file accept=".xlsx,.xls,.csv" class="input"><div data-out></div></div></div>'
+      + '<div class="card"><div class="row"><h2>신입생 초기화</h2><span class="hint">입학년도(위 칸)의 1학년 자리·명렬을 모두 지웁니다(자동 백업).</span><span style="margin-left:auto"></span><button class="btn sm dan" id="fz">신입생 초기화</button></div></div>';
+    document.getElementById('fz').onclick = () => { const y = document.getElementById('fy').value.trim(); resetData(y + ' 입학 신입생', 'freshmen', y); };
     v.querySelector('[data-t]').onclick = () => downloadTemplate('freshman');
     document.getElementById('fs').onclick = () => {
       const total = Number(document.getElementById('ft').value), n = Number(document.getElementById('fc').value);
@@ -730,7 +836,28 @@
         : '<div class="row"><label class="field small">학년별 반 수<input id="pc1" class="input sm" style="width:70px" value="11"></label><label class="field small">반별 인원<input id="pc2" class="input sm" style="width:70px" value="30"></label>'
           + '<button class="btn pri" id="pg" style="align-self:flex-end">연습 데이터 만들기</button></div><p class="hint">가상 학생(1·2학년)과 연습 교사 10명(teacher01~10)을 만들고, 기존 연습 데이터는 지웁니다. 쪽지는 교사 계정·학생 계정 화면에서 출력하세요.</p>')
       + '</div>'
+      + '<div class="card" style="grid-column:1/-1" id="rsbox"><div class="row"><h2>데이터 초기화</h2><button class="btn sm" id="rsl">불러오기</button></div><p class="hint">항목별로 지웁니다. 지우기 전에 자동으로 백업하며, 위의 복원으로 되돌릴 수 있습니다. 교사 계정은 교사 계정 화면에서 골라 지웁니다.</p><div id="rst"></div></div>'
       + '<div class="card" style="grid-column:1/-1"><div class="row"><h2>변경 이력</h2><button class="btn sm" id="al">불러오기</button></div><div id="alog"></div></div></div>';
+    const rsl = document.getElementById('rsl');
+    const loadReset = async () => {
+      const n = await api('dataCounts', {});
+      const rows = [];
+      Object.keys(n.students.byGrade).sort().forEach((g) => rows.push([g + '학년 학생 (모든 상태)', n.students.byGrade[g], 'students', g]));
+      rows.push(['학생 전체', n.students.all, 'students', 'all']);
+      Object.keys(n.freshmen).sort().forEach((y) => rows.push([y + ' 입학 1학년 (신입생·자리 포함)', n.freshmen[y], 'freshmen', y]));
+      n.selections.forEach((r) => rows.push([(r.kind === '참고조사' ? '참고조사: ' : '수강신청: ') + r.name, r.count, 'selections', r.id]));
+      Object.keys(n.history.byYear).sort().forEach((y) => rows.push(['이수 이력: ' + y + ' 입학생', n.history.byYear[y], 'history', y]));
+      rows.push(['이수 이력 전체', n.history.all, 'history', 'all']);
+      rows.push(['블록 편성 (모든 편성·분반·배정)', n.blocks, 'blocks', '']);
+      rows.push(['시간표 (모든 버전)', n.timetable, 'timetable', '']);
+      rows.push(['교사 불가 시간', n.unavailable, 'unavailable', '']);
+      rows.push(['보강·교체·자습 기록', n.changes, 'changes', '']);
+      rows.push(['알림', n.notices, 'notices', '']);
+      document.getElementById('rst').innerHTML = '<div class="tbl-wrap" style="max-height:360px"><table class="tbl"><thead><tr><th>항목</th><th class="num">건수</th><th></th></tr></thead><tbody>'
+        + rows.map((r, i) => '<tr><td>' + esc(r[0]) + '</td><td class="num">' + esc(r[1]) + '</td><td><button class="btn sm dan" data-rx="' + i + '"' + (r[1] ? '' : ' disabled') + '>초기화</button></td></tr>').join('') + '</tbody></table></div>';
+      document.querySelectorAll('[data-rx]').forEach((b) => { const r = rows[Number(b.dataset.rx)]; b.onclick = () => resetData(r[0], r[2], r[3], loadReset); });
+    };
+    rsl.onclick = () => run(rsl, loadReset);
     const al = document.getElementById('al');
     al.onclick = () => run(al, async () => {
       const list = await api('auditList', {});
@@ -771,7 +898,7 @@
   }
 
   /* ---------- 다른 파일(sel.js)과 함께 쓰는 도구 ---------- */
-  window.APP = { api, esc, toast, run, modal, saveBlob, render, renderHome, VIEWS, isAdmin, canViewAll, CFG,
+  window.APP = { api, esc, toast, run, modal, saveBlob, render, renderHome, VIEWS, isAdmin, canViewAll, CFG, resetData, confirmTyped,
     get S() { return S; }, get ui() { return ui; }, MODE };
   async function loadRounds() {
     if (!S.user || S.user.kind !== 'student') return;

@@ -446,6 +446,7 @@
           return '<tr><td>' + g.grade + '학년</td><td>' + esc(g.cohort) + '</td><td><input class="input sm w4" data-cl="' + g.grade + '" value="' + esc(classes[g.grade]) + '"> <span class="muted small">' + esc(g.from || '') + '</span></td>'
             + '<td>' + (g.hasCur ? '<span class="okk">✓</span>' : '<span class="no">없음</span>') + '</td><td class="small">' + ([1, 2].map((tm) => { const p = ps.find((x) => String(x.sem) === String(tm)); return tm + '학기: ' + (p ? '블록 편성(' + esc(p.status) + ')' : '신청 인원으로 어림'); }).join(' · ')) + '</td></tr>';
         }).join('') + '</tbody></table>'
+        + ((d.surveyOnly || []).length ? '<div class="note">아직 신청이 없는 학기는 참고조사(수요조사) 인원으로 어림했습니다: ' + esc(d.surveyOnly.map((k) => { const [y, sm] = k.split('|'); return y + ' 입학 ' + sm.replace('-', '학년 ') + '학기'; }).join(', ')) + '</div>' : '')
         + '<div class="row"><label class="row small">편성 전 과목은 신청 인원 ÷ <input id="dmest" class="input sm w4" value="' + esc(est) + '">명으로 분반 수를 어림합니다.</label></div>'
         + '<p class="hint">교육청 양식(교육과정편제 및 단위시간 배당표)의 왼쪽 표와 같은 열 순서입니다. 내려받은 표를 양식에 붙여 넣으면 정원과목별 소요가 계산됩니다. 창의적 체험활동·진로 같은 과목은 양식에서 직접 더하세요.</p></div>'
         + '<div class="grid-dm"><div class="card tight"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>연번</th><th>과목</th><th>정원과목</th><th>학년</th><th>학기</th><th>학점</th><th>학급수</th><th>연환산</th><th>근거</th></tr></thead><tbody>'
@@ -498,7 +499,8 @@
           if (plan) { cls = plan.counts[o.과목] || 0; why = '블록 편성'; }
           else {
             const k = d.selCount[g.cohort + '|' + sem + '|' + o.과목] || 0;
-            cls = k ? Math.max(1, Math.ceil(k / est)) : 0; why = k ? '신청 ' + k + '명 어림' : '';
+            const sv = (d.surveyOnly || []).includes(g.cohort + '|' + sem);
+            cls = k ? Math.max(1, Math.ceil(k / est)) : 0; why = k ? (sv ? '참고조사 ' : '신청 ') + k + '명 어림' : '';
           }
           push(o.과목, (plan && plan.groups[o.과목]) || o.정원과목 || '', g.grade, tm, Number(o.학점), cls, why);
         });
