@@ -25,7 +25,7 @@
 
   // 학교(Workspace) 계정 주소 /a/macros/도메인/s/… 는 로그인을 요구하므로 일반 주소로 바꿔 씁니다.
   function apiUrl() { return String(CFG.API_URL || '').trim().replace(/\/a\/macros\/[^/]+\/s\//, '/macros/s/'); }
-  const WEB_VERSION = '0.5.5';
+  const WEB_VERSION = '0.5.6';
   /* 같은 화면을 오가며 같은 자료를 다시 부를 때 30초 동안은 저장본을 씀. 무언가를 저장·변경하면 저장본을 모두 비움 */
   const READ_CACHE = new Set(['settingsGet', 'studentList', 'teacherList', 'selRounds', 'curGet', 'selStatus', 'blockList', 'blockData', 'demandData',
     'ttVersions', 'ttView', 'ttData', 'noticeList', 'pushConfig', 'opsDay', 'opsList', 'retentionGet', 'dataCounts', 'selHome']);
@@ -111,7 +111,7 @@
     bg.innerHTML = '<div class="modal' + (opts && opts.wide ? ' wide' : '') + '" role="dialog" aria-modal="true">' + html + '</div>';
     document.body.appendChild(bg);
     const close = () => bg.remove();
-    bg.addEventListener('click', (e) => { if (e.target === bg || e.target.closest('[data-close]')) close(); });
+    bg.addEventListener('click', (e) => { if (bg.dataset.busy) return; if (e.target === bg || e.target.closest('[data-close]')) close(); });
     if (onReady) onReady(bg, close);
     const f = bg.querySelector('button, input'); if (f) f.focus();
     return close;
@@ -504,8 +504,16 @@
       + '<div class="row" style="justify-content:flex-end"><button class="btn" data-close>취소</button><button class="btn dan" id="cto" disabled>삭제</button></div>',
     (bg, close) => {
       const inp = bg.querySelector('#cty'), ob = bg.querySelector('#cto');
-      inp.oninput = () => { ob.disabled = inp.value.trim() !== '삭제'; };
-      ob.onclick = () => run(ob, async () => { await onOk(); close(); });
+      const check = () => { ob.disabled = inp.value.replace(/\s/g, '') !== '삭제'; };
+      inp.oninput = check; inp.addEventListener('compositionend', check); inp.addEventListener('keyup', check);
+      inp.onkeydown = (e) => { if (e.key === 'Enter' && !ob.disabled) ob.click(); };
+      ob.onclick = () => {
+        const note = document.createElement('div');
+        note.className = 'note'; note.textContent = '지우는 중입니다. 먼저 백업을 만들기 때문에 30초~1분쯤 걸릴 수 있습니다. 창을 닫지 마세요.';
+        ob.parentNode.before(note);
+        bg.querySelectorAll('[data-close]').forEach((x) => { x.disabled = true; }); bg.dataset.busy = '1';
+        return run(ob, async () => { await onOk(); close(); }).finally(() => { note.remove(); delete bg.dataset.busy; bg.querySelectorAll('[data-close]').forEach((x) => { x.disabled = false; }); });
+      };
     });
   }
   /* 탭별 초기화 버튼: target·scope는 서버 dataReset 대상 */
@@ -874,7 +882,7 @@
         : '<div class="row"><label class="field small">학년별 반 수<input id="pc1" class="input sm" style="width:70px" value="11"></label><label class="field small">반별 인원<input id="pc2" class="input sm" style="width:70px" value="30"></label>'
           + '<button class="btn pri" id="pg" style="align-self:flex-end">연습 데이터 만들기</button></div><p class="hint">가상 학생(1·2학년)과 연습 교사 10명(teacher01~10)을 만들고, 기존 연습 데이터는 지웁니다. 쪽지는 교사 계정·학생 계정 화면에서 출력하세요.</p>')
       + '</div>'
-      + '<div class="card" style="grid-column:1/-1" id="rsbox"><div class="row"><h2>데이터 초기화</h2><button class="btn sm" id="rsl">불러오기</button><span style="margin-left:auto"></span><button class="btn sm" id="ccl" title="구글 시트를 직접 고친 뒤 바로 반영할 때">캐시 비우기</button></div><p class="hint">항목별로 지웁니다. 지우기 전에 자동으로 백업하며, 위의 복원으로 되돌릴 수 있습니다. 교사 계정은 교사 계정 화면에서 골라 지웁니다.</p><div id="rst"></div></div>'
+      + '<div class="card" style="grid-column:1/-1" id="rsbox"><div class="row"><h2>데이터 초기화</h2><button class="btn sm" id="rsl">불러오기</button><span style="margin-left:auto"></span><button class="btn sm" id="ccl" title="구글 시트를 직접 고친 뒤 바로 반영할 때">캐시 비우기</button><button class="btn sm dan" id="zall">전체 초기화</button></div><p class="hint">항목별로 지웁니다. 지우기 전에 자동으로 백업하며, 위의 복원으로 되돌릴 수 있습니다. 교사 계정은 교사 계정 화면에서 골라 지웁니다.</p><div id="rst"></div></div>'
       + '<div class="card" style="grid-column:1/-1"><div class="row"><h2>변경 이력</h2><button class="btn sm" id="al">불러오기</button></div><div id="alog"></div></div></div>';
     const rsl = document.getElementById('rsl');
     const loadReset = async () => {
@@ -896,6 +904,15 @@
       document.querySelectorAll('[data-rx]').forEach((b) => { const r = rows[Number(b.dataset.rx)]; b.onclick = () => resetData(r[0], r[2], r[3], loadReset); });
     };
     rsl.onclick = () => run(rsl, loadReset);
+    document.getElementById('zall').onclick = () => confirmTyped(MODE === 'practice' ? '연습 모드 전체 초기화' : '전체 초기화',
+      '<p>학생 명렬·계정, 수강신청·참고조사 내용, 이수 이력, 블록 편성, 시간표, 교사 불가 시간, 보강·교체 기록, 알림을 모두 지웁니다.</p>'
+      + '<label class="row"><input type="checkbox" id="zt"> 교사 계정도 지우기 (본인과 admin 계정은 남김)</label>'
+      + '<label class="row"><input type="checkbox" id="zs"> 교육과정·신청 회차·일과 시간도 지우기</label>'
+      + '<p class="hint">학교 이름·학년도·학급 설정은 남습니다. ' + (MODE === 'real' ? '지우기 전에 자동으로 백업하며, 위의 복원으로 되돌릴 수 있습니다.' : '연습 모드는 백업하지 않습니다.') + '</p>',
+      async () => {
+        const r = await api('dataReset', { target: 'all', scope: '', confirm: '삭제', withTeachers: document.getElementById('zt').checked, withSetup: document.getElementById('zs').checked });
+        toast('전체 초기화했습니다. (' + r.removed + '건)'); loadReset();
+      });
     const ccl = document.getElementById('ccl');
     ccl.onclick = () => run(ccl, async () => { await api('cacheClear', {}); clearReadCache(); toast('캐시를 비웠습니다. 시트에서 직접 고친 내용이 바로 반영됩니다.'); });
     const al = document.getElementById('al');
