@@ -256,3 +256,4 @@ tr.chgrow td { background: #FFF8EC; }
 .cand.dim { opacity: .55; }
 table.ilr.wide td, table.ilr.wide th { white-space: normal; max-width: none; font-size: 9.5pt; padding: 3px 5px; }
 @media (max-width: 900px) { .grid-ops { grid-template-columns: 1fr; } }
+[hidden] { display: none !important; }

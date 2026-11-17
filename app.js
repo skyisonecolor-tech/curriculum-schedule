@@ -25,6 +25,7 @@
 
   // 학교(Workspace) 계정 주소 /a/macros/도메인/s/… 는 로그인을 요구하므로 일반 주소로 바꿔 씁니다.
   function apiUrl() { return String(CFG.API_URL || '').trim().replace(/\/a\/macros\/[^/]+\/s\//, '/macros/s/'); }
+  const WEB_VERSION = '0.5.2';
   async function api(action, payload) {
     if (!CFG.API_URL || CFG.API_URL.indexOf('http') !== 0) throw new Error('config.js에 서버 주소(API_URL)를 먼저 넣어 주세요.');
     let res;
@@ -35,7 +36,9 @@
     let j;
     try { j = await res.json(); } catch (e) { const x = new Error('서버 응답을 읽을 수 없습니다.'); x.code = 'NET'; throw x; }
     if (!j.ok) {
-      const e = new Error(j.message || '오류가 발생했습니다.'); e.code = j.error;
+      const e = new Error(j.error === 'NO_ACTION'
+        ? '서버(Code.gs)가 화면보다 예전 버전이라 이 기능을 모릅니다. 관리자는 Apps Script에서 Code.gs를 새 것으로 바꾸고 [배포 → 배포 관리 → 연필 → 버전: 새 버전 → 배포]를 해 주세요.'
+        : (j.message || '오류가 발생했습니다.')); e.code = j.error;
       if (j.error === 'AUTH') { clearSession(); setTimeout(render, 0); }
       if (j.error === 'MUST_CHANGE') { S.must = true; save(); setTimeout(render, 0); }
       throw e;
@@ -172,7 +175,13 @@
     if (S.must) { renderPassword(true); return; }
     renderHome();
   }
-  function banner() { return MODE === 'practice' ? '<div class="practice">연습 모드 — 실제 데이터가 아닙니다</div>' : ''; }
+  function banner() {
+    let b = MODE === 'practice' ? '<div class="practice">연습 모드 — 실제 데이터가 아닙니다</div>' : '';
+    if (ui.serverVersion && ui.serverVersion !== WEB_VERSION && S.user && S.user.role === '최종관리자') {
+      b += '<div class="practice" style="background:#fdecea;color:#8a1c1c">서버 버전(' + esc(ui.serverVersion) + ')과 화면 버전(' + WEB_VERSION + ')이 다릅니다. Apps Script의 Code.gs를 새 것으로 바꾸고 <b>배포 관리 → 새 버전</b>으로 배포해 주세요. 그 전에는 일부 기능에서 「알 수 없는 요청」이 나옵니다.</div>';
+    }
+    return b;
+  }
 
   function renderNoConfig() {
     $app.innerHTML = '<div class="center"><div class="login"><h1>일과 알리미</h1><div class="note warn">설치가 덜 끝났습니다. <b>config.js</b>의 <b>API_URL</b>에 Apps Script 웹 앱 주소를 넣어 주세요.</div></div></div>';
@@ -501,8 +510,10 @@
       + (pend.length ? '<button class="btn sm" id="tps" title="아직 처음 로그인하지 않은 선생님의 개별 코드 쪽지를 부서 순으로 출력">코드 대기 ' + pend.length + '명 쪽지</button>' : '')
       + '<button class="btn sm" id="tup">명단 엑셀로 올리기</button><button class="btn pri sm" id="tn">계정 추가</button></div>'
       + '<div id="tubox" class="card" hidden></div>'
-      + '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름 (로그인)</th><th>부서</th><th>권한</th><th>담임</th><th>교과</th><th>상태</th><th>비밀번호</th><th>마지막 접속</th><th></th></tr></thead><tbody>'
-      + list.map((t) => '<tr><td>' + esc(t.name) + (t.loginId ? ' <span class="muted small">· ' + esc(t.loginId) + '</span>' : '') + (t.sameName ? ' <span class="pill warn" title="같은 이름의 선생님이 있어 로그인할 때 부서를 고릅니다">동명이인</span>' : '') + '</td>'
+      + '<div class="row bulkbar" id="tbar"><span class="muted" id="tcnt">선생님을 골라 일괄 작업을 할 수 있습니다.</span><span style="margin-left:auto"></span>'
+      + '<button class="btn sm" data-bulk="reset" disabled>비밀번호 초기화</button><button class="btn sm" data-bulk="전출" disabled>전출 처리</button><button class="btn sm" data-bulk="재직" disabled>재직으로</button><button class="btn sm dan" data-bulk="delete" disabled>삭제</button></div>'
+      + '<div class="tbl-wrap"><table class="tbl"><thead><tr><th style="width:32px"><input type="checkbox" id="tall" aria-label="모두 선택"></th><th>이름 (로그인)</th><th>부서</th><th>권한</th><th>담임</th><th>교과</th><th>상태</th><th>비밀번호</th><th>마지막 접속</th><th></th></tr></thead><tbody>'
+      + list.map((t) => '<tr><td>' + (t.loginId === 'admin' || t.id === (S.user || {}).id ? '' : '<input type="checkbox" data-sel="' + esc(t.id) + '" aria-label="' + esc(t.name) + ' 선택">') + '</td><td>' + esc(t.name) + (t.loginId ? ' <span class="muted small">· ' + esc(t.loginId) + '</span>' : '') + (t.sameName ? ' <span class="pill warn" title="같은 이름의 선생님이 있어 로그인할 때 부서를 고릅니다">동명이인</span>' : '') + '</td>'
         + '<td>' + esc(t.dept) + '</td><td>' + esc(t.role) + '</td><td>' + (t.homeroomGrade ? esc(t.homeroomGrade) + '-' + esc(t.homeroomClass) : '') + '</td>'
         + '<td>' + esc(t.subject) + '</td><td>' + esc(t.status) + '</td><td>' + (t.pending ? '<span class="pill warn">코드 대기</span>' : '<span class="pill ok">설정 완료</span>') + '</td>'
         + '<td class="muted">' + esc(t.lastSeen || '-') + '</td><td class="row"><button class="btn sm" data-edit="' + esc(t.id) + '">수정</button><button class="btn sm dan" data-treset="' + esc(t.id) + '">초기화</button></td></tr>').join('')
@@ -511,6 +522,7 @@
     document.getElementById('tn').onclick = () => teacherForm(null, v);
     const tps = document.getElementById('tps');
     if (tps) tps.onclick = () => run(tps, async () => { const r = await api('teacherSlips', {}); printSlips(r, '선생님 개별 코드 안내'); });
+    teacherBulk(v, list);
     document.getElementById('tup').onclick = () => { const bx = document.getElementById('tubox'); bx.hidden = !bx.hidden; if (!bx.hidden) teacherUpload(bx, v); };
     v.querySelectorAll('[data-edit]').forEach((b) => { b.onclick = () => teacherForm(list.find((t) => t.id === b.dataset.edit), v); });
     v.querySelectorAll('[data-treset]').forEach((b) => {
@@ -522,6 +534,55 @@
           showCode('새 개별 코드', r.name + ' 선생님' + (r.dept ? ' · ' + r.dept : ''), r.code, { name: r.name, dept: r.dept, loginId: r.loginId, teacher: true, code: r.code });
           teachersView(v);
         });
+      };
+    });
+  }
+  function teacherBulk(v, list) {
+    const boxes = Array.from(v.querySelectorAll('[data-sel]'));
+    const all = document.getElementById('tall');
+    const picked = () => boxes.filter((b) => b.checked).map((b) => b.dataset.sel);
+    const sync = () => {
+      const n = picked().length;
+      document.getElementById('tcnt').textContent = n ? '선택 ' + n + '명' : '선생님을 골라 일괄 작업을 할 수 있습니다.';
+      v.querySelectorAll('[data-bulk]').forEach((b) => { b.disabled = !n; });
+      all.checked = n > 0 && n === boxes.length; all.indeterminate = n > 0 && n < boxes.length;
+    };
+    boxes.forEach((b) => { b.onchange = sync; });
+    all.onchange = () => { boxes.forEach((b) => { b.checked = all.checked; }); sync(); };
+    const names = (ids) => ids.map((id) => (list.find((t) => t.id === id) || {}).name).join(', ');
+    const skippedHtml = (sk) => (sk && sk.length ? '<p class="hint">건너뜀: ' + sk.map((x) => esc(x.name) + '(' + esc(x.why) + ')').join(', ') + '</p>' : '');
+    v.querySelectorAll('[data-bulk]').forEach((b) => {
+      b.onclick = () => {
+        const ids = picked(); const k = b.dataset.bulk;
+        if (k === 'reset') {
+          if (!confirm(ids.length + '명의 비밀번호를 초기화하고 새 개별 코드를 발급할까요?\n' + names(ids) + '\n\n지금 쓰는 비밀번호는 바로 쓸 수 없게 됩니다.')) return;
+          run(b, async () => {
+            const r = await api('teacherBulkReset', { ids });
+            await teachersView(v);
+            modal('<h2>비밀번호 초기화 ' + r.issued.length + '명</h2><p class="muted">새 개별 코드를 발급했습니다. 쪽지를 출력해 전달해 주세요.</p>' + skippedHtml(r.skipped)
+              + '<div class="row" style="justify-content:flex-end"><button class="btn" data-close>닫기</button>' + (r.issued.length ? '<button class="btn pri" data-print>코드 쪽지 출력</button>' : '') + '</div>',
+            (bg) => { const pb = bg.querySelector('[data-print]'); if (pb) pb.onclick = () => printSlips(r.issued, '선생님 개별 코드 안내'); });
+          });
+        } else if (k === 'delete') {
+          if (!confirm(ids.length + '명의 계정을 삭제할까요?\n' + names(ids) + '\n\n시간표·블록 편성·보강 기록에 들어 있는 분은 기록 보호를 위해 삭제하지 않습니다(전출 처리를 권합니다). 삭제 전에 자동으로 백업합니다.')) return;
+          run(b, async () => {
+            const r = await api('teacherBulkDelete', { ids });
+            await teachersView(v);
+            const inUse = (r.skipped || []).filter((x) => x.inUse);
+            modal('<h2>교사 계정 삭제</h2><p>' + (r.deleted.length ? esc(r.deleted.length + '명을 삭제했습니다: ' + r.deleted.join(', ')) : '삭제한 계정이 없습니다.') + '</p>' + skippedHtml(r.skipped)
+              + (inUse.length ? '<div class="note warn">기록에 들어 있는 ' + inUse.length + '명은 <b>전출</b>로 바꾸면 로그인과 목록 선택에서 빠지고, 지난 시간표·보강 기록은 그대로 남습니다.</div>' : '')
+              + '<div class="row" style="justify-content:flex-end"><button class="btn" data-close>닫기</button>' + (inUse.length ? '<button class="btn pri" data-out>' + inUse.length + '명 전출 처리</button>' : '') + '</div>',
+            (bg, close) => { const ob = bg.querySelector('[data-out]'); if (ob) ob.onclick = () => run(ob, async () => { await api('teacherBulkStatus', { ids: inUse.map((x) => x.id), status: '전출' }); close(); toast('전출로 바꿨습니다.'); teachersView(v); }); });
+          });
+        } else {
+          if (!confirm(ids.length + '명을 ' + k + (k === '재직' ? '으로' : '로') + ' 바꿀까요?\n' + names(ids))) return;
+          run(b, async () => {
+            const r = await api('teacherBulkStatus', { ids, status: k });
+            await teachersView(v);
+            if (r.skipped.length) modal('<h2>' + r.changed + '명 변경</h2>' + skippedHtml(r.skipped) + '<div class="row" style="justify-content:flex-end"><button class="btn pri" data-close>확인</button></div>');
+            else toast(r.changed + '명을 ' + k + (k === '재직' ? '으로' : '로') + ' 바꿨습니다.');
+          });
+        }
       };
     });
   }
@@ -651,10 +712,11 @@
     if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
     try {
       const p = await api('ping', {});
-      ui.school = p.schoolName || ''; ui.year = p.year || '';
+      ui.school = p.schoolName || ''; ui.year = p.year || ''; ui.serverVersion = p.version || '';
       if (!S.token) renderLogin();
     } catch (e) { /* 서버 연결 실패는 로그인 시 안내 */ }
     if (S.token) { try { const m = await api('me', {}); S.user = m.user; S.must = m.mustChangePassword; save(); if (!S.must) await loadRounds(); render(); } catch (e) { /* 처리됨 */ } }
+    else if (ui.serverVersion) render();
   }
   boot();
 })();
