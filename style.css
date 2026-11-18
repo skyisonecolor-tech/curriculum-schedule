@@ -258,3 +258,7 @@ table.ilr.wide td, table.ilr.wide th { white-space: normal; max-width: none; fon
 @media (max-width: 900px) { .grid-ops { grid-template-columns: 1fr; } }
 [hidden] { display: none !important; }
 .linkbtn { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; } .linkbtn:hover { color: var(--pri, #2456c7); text-decoration: underline; }
+tr.paired th { background: #f4f1ff; }
+.pairnote { color: #5b4bb7; }
+.bgrid .occ { display: block; font-size: 12px; color: #8a8a99; background: repeating-linear-gradient(45deg, #f3f3f6, #f3f3f6 6px, #ebebf0 6px, #ebebf0 12px); border-radius: 6px; padding: 6px; text-align: center; }
+tr.best td { background: #f2f7ff; }

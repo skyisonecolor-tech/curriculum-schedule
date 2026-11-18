@@ -1,6 +1,6 @@
 // 일과 알리미 서비스 워커: 화면 파일은 이 기기에 저장해 두고 바로 띄웁니다(새 버전이 올라오면 CACHE 이름이 바뀌어 새로 받음).
 // 데이터(Apps Script)는 저장하지 않고 항상 서버에서 받습니다.
-const CACHE = 'alimi-shell-v11';
+const CACHE = 'alimi-shell-v12';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'rules.js', 'sel.js', 'block.js', 'blocks.js', 'block-worker.js', 'tt.js', 'ttmodel.js', 'tt-ui.js', 'tt-worker.js', 'ops.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 // 학교마다 고치는 파일: 항상 서버에서 먼저 받기
 const NETWORK_FIRST = ['config.js'];

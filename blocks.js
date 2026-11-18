@@ -111,8 +111,13 @@
     st.tcount = tcount;
     const defRooms = d.classes.rooms.length ? d.classes.rooms : Array.from({ length: d.classes.count || 0 }, (_, i) => String(Number(d.grade) * 100 + i + 1));
     st.rooms = set.rooms || defRooms;
+    st.homeRooms = defRooms;
+    st.commons = d.subjects.filter((o) => o.구분 !== '선택').map((o) => ({ name: o.과목, credit: Number(o.학점), group: o.정원과목 || '' }));
+    st.classNos = Array.from(new Set(d.students.map((s) => Number(s.classNo)).filter((x) => x > 0))).sort((a, b) => a - b);
+    if (!st.classNos.length) st.classNos = Array.from({ length: d.classes.count || 0 }, (_, i) => i + 1);
+    st.pairs = (set.pairs || []).map((p) => Object.assign({}, p));
     if (d.plan && d.plan.sections.length) {
-      st.result = { blocks: set.blocks || deriveBlocks(d.plan.sections), sections: d.plan.sections.map((x) => Object.assign({}, x)), issues: set.lastIssues || [] };
+      st.result = { blocks: set.blocks || deriveBlocks(d.plan.sections), pairs: set.pairSlots || [], sections: d.plan.sections.map((x) => Object.assign({}, x)), issues: set.lastIssues || [] };
     }
     if (set.neis) st.neis = set.neis;
     return st;
@@ -130,7 +135,55 @@
       students: included().map((s) => ({ id: s.id, cls: s.classNo, no: s.number, picks: s.picks })),
       roomCount: BS.rooms.length, rooms: BS.rooms, teacherCap: caps,
       blocks: BS.result ? BS.result.blocks : null,
+      pairs: BS.pairs.map(pairSpec).filter(Boolean),
+      commons: BS.commons,
     };
+  }
+  /* ---------- 교차 묶음 ---------- */
+  function parseClasses(txt) {
+    const out = [];
+    String(txt || '').split(/[,\s]+/).filter(Boolean).forEach((t) => {
+      const m = t.match(/^(\d+)\s*[-~]\s*(\d+)$/);
+      if (m) { for (let i = Number(m[1]); i <= Number(m[2]); i++) out.push(i); } else if (/^\d+$/.test(t)) out.push(Number(t));
+    });
+    return Array.from(new Set(out)).filter((c) => BS.classNos.includes(c)).sort((a, b) => a - b);
+  }
+  function classText(list) {
+    if (!list.length) return '';
+    const parts = []; let a = list[0], b = list[0];
+    for (let i = 1; i <= list.length; i++) { if (list[i] === b + 1) b = list[i]; else { parts.push(a === b ? String(a) : a + '-' + b); a = b = list[i]; } }
+    return parts.join(',');
+  }
+  function pairHalves(p) { const h1 = parseClasses(p.h1); return [h1, BS.classNos.filter((c) => !h1.includes(c))]; }
+  function pairSpec(p) {
+    const halves = pairHalves(p);
+    if (!halves[0].length || !halves[1].length) return null;
+    const cm = BS.commons.find((c) => c.name === p.common);
+    return { type: p.type, credit: Number(p.credit), common: p.type === 'common' ? { name: p.common || '', group: cm ? cm.group : '' } : null, halves };
+  }
+  function slotOf(blockId) { const b = BS.result && BS.result.blocks.find((x) => x.id === blockId); return b ? (b.slot || b.id) : blockId; }
+  /** 시간마다 공통과목 학급이 쓰는 교실·교사 */
+  function slotBusy() {
+    const rooms = {}, groups = {}, notes = {}, labels = {};
+    ((BS.result && BS.result.pairs) || []).forEach((p) => {
+      p.slots.forEach((sl) => {
+        if (sl.commonHalf < 0 || !p.common) return;
+        const cl = p.halves[sl.commonHalf];
+        rooms[sl.id] = cl.map((c) => BS.homeRooms[c - 1]).filter(Boolean);
+        labels[sl.id] = {}; cl.forEach((c) => { if (BS.homeRooms[c - 1]) labels[sl.id][BS.homeRooms[c - 1]] = c + '반 ' + p.common.name; });
+        if (p.common.group) (groups[sl.id] = groups[sl.id] || {})[p.common.group] = cl.length;
+        notes[sl.id] = p.halfLabels[sl.commonHalf] + ' ' + p.common.name;
+      });
+    });
+    return { rooms, groups, notes, labels };
+  }
+  function blockNote(b) {
+    if (!BS.result || b.pair == null || b.pair < 0) return '';
+    const p = (BS.result.pairs || [])[b.pair]; if (!p) return '';
+    const sl = p.slots.find((x) => x.id === b.slot); if (!sl) return '';
+    const who = p.halfLabels[b.half];
+    const other = sl.commonHalf >= 0 ? p.halfLabels[sl.commonHalf] + ' ' + (p.common ? p.common.name : '공통') : sl.byHalf.filter((x) => x && x !== b.id).join('');
+    return who + ' 학생 · 같은 시간 ' + other;
   }
   const stuById = () => { const m = {}; BS.d.students.forEach((s) => { m[s.id] = s; }); return m; };
   const teacherName = (id) => { const t = BS.d.teachers.find((x) => x.id === id); return t ? t.name : ''; };
@@ -140,16 +193,22 @@
     const out = [];
     if (!BS.result) return out;
     const secs = BS.result.sections, rooms = BS.rooms;
-    BS.result.blocks.forEach((b) => {
-      const inB = secs.filter((s) => s.block === b.id);
-      if (inB.length > rooms.length) out.push({ level: 'error', text: b.id + ' 블록 분반 ' + inB.length + '개 > 교실 ' + rooms.length + '개' });
-      const rm = {}, tc = {}, gc = {};
+    const busy = slotBusy();
+    const slotIds = Array.from(new Set(BS.result.blocks.map((b) => b.slot || b.id)));
+    slotIds.forEach((sl) => {
+      const ids = BS.result.blocks.filter((b) => (b.slot || b.id) === sl).map((b) => b.id);
+      const name = ids.length > 1 || ids[0] !== sl ? sl + ' 시간' : sl + ' 블록';
+      const inB = secs.filter((s) => ids.includes(s.block));
+      const occ = (busy.rooms[sl] || []).length;
+      if (inB.length + occ > rooms.length) out.push({ level: 'error', text: name + ' 분반 ' + inB.length + '개' + (occ ? ' + 공통과목 학급 ' + occ + '개' : '') + ' > 교실 ' + rooms.length + '개' });
+      const rm = {}, tc = {}, gc = Object.assign({}, busy.groups[sl] || {});
+      (busy.rooms[sl] || []).forEach((r) => { rm[r] = '공통'; });
       inB.forEach((s) => {
-        if (s.room) { if (rm[s.room]) out.push({ level: 'error', text: b.id + ' 블록에서 ' + s.room + ' 교실을 두 분반이 씁니다.' }); rm[s.room] = 1; }
-        if (s.teacherId) { if (tc[s.teacherId]) out.push({ level: 'error', text: b.id + ' 블록에서 ' + teacherName(s.teacherId) + ' 선생님이 두 분반을 맡습니다.' }); tc[s.teacherId] = 1; }
+        if (s.room) { if (rm[s.room]) out.push({ level: 'error', text: name + '에서 ' + s.room + ' 교실을 ' + (rm[s.room] === '공통' ? '공통과목 학급과 함께' : '두 분반이') + ' 씁니다.' }); rm[s.room] = 1; }
+        if (s.teacherId) { if (tc[s.teacherId]) out.push({ level: 'error', text: name + '에서 ' + teacherName(s.teacherId) + ' 선생님이 두 분반을 맡습니다.' }); tc[s.teacherId] = 1; }
         if (s.group) gc[s.group] = (gc[s.group] || 0) + 1;
       });
-      Object.keys(gc).forEach((g) => { const cap = Number(BS.caps[g]); if (cap > 0 && gc[g] > cap) out.push({ level: 'error', text: b.id + ' 블록 ' + g + ' 분반 ' + gc[g] + '개 > 교사 ' + cap + '명' }); });
+      Object.keys(gc).forEach((g) => { const cap = Number(BS.caps[g]); if (cap > 0 && gc[g] > cap) out.push({ level: 'error', text: name + ' ' + g + ' 수업 ' + gc[g] + '개 > 교사 ' + cap + '명' }); });
     });
     secs.forEach((s) => {
       const n = s.students.length;
@@ -164,7 +223,7 @@
     included().forEach((st) => {
       const w = where[st.id] || [];
       if (st.picks.some((p) => !w.some((x) => x.subject === p))) missing++;
-      if (new Set(w.map((x) => x.block)).size !== w.length) clash++;
+      if (new Set(w.map((x) => slotOf(x.block))).size !== w.length) clash++;
     });
     if (missing) out.push({ level: 'error', text: '과목이 배정되지 않은 학생 ' + missing + '명 (학생별 확인 탭)' });
     if (clash) out.push({ level: 'error', text: '한 블록에 두 과목이 겹친 학생 ' + clash + '명' });
@@ -181,6 +240,7 @@
     body.querySelectorAll('[data-bt]').forEach((b) => { b.onclick = () => { BS.tab = b.dataset.bt; draw(body); }; });
     const save = (status, btn) => run(btn, async () => {
       const set = { include: BS.include, rooms: BS.rooms, caps: BS.caps, blocks: BS.result.blocks, neis: BS.neis, lastIssues: (BS.result.issues || []).slice(0, 30),
+        pairs: BS.pairs, pairSlots: BS.result.pairs || [],
         subjects: Object.fromEntries(BS.subjects.map((s) => [s.name, { group: s.group, min: s.min, max: s.max, sections: s.sections }])) };
       const r = await api('blockSave', { roundId: BS.roundId, sem: BS.sem, year: BS.year, name: BS.d.round.name + ' ' + semShort(BS.sem), settings: set, sections: BS.result.sections, status });
       BS.status = r.status; BS.dirty = false; toast(status === '확정' ? '확정해 저장했습니다.' : '저장했습니다.'); draw(body);
@@ -215,7 +275,8 @@
       + '<p class="hint">기본값은 [관리 → 학급 설정]의 ' + esc(BS.d.grade) + '학년 교실입니다. 특별실을 쓰려면 쉼표로 더 넣으세요. (예: 과학실1, 음악실)</p>'
       + '<h3>동시에 수업할 수 있는 교사 수 (정원과목별)</h3><table class="mini edit"><thead><tr><th>정원과목</th><th>교사 계정</th><th>동시 가능</th></tr></thead><tbody>'
       + groups.map((g) => '<tr><td>' + esc(g) + '</td><td class="num">' + (BS.tcount[g] || 0) + '</td><td><input class="input sm w4" data-cap="' + esc(g) + '" inputmode="numeric" value="' + esc(BS.caps[g]) + '" placeholder="제한 없음"></td></tr>').join('')
-      + '</tbody></table><p class="hint">한 블록 안에서 같은 정원과목 분반이 이 수를 넘지 않게 합니다. 비우면 제한하지 않습니다. 교사 계정의 「교과」를 정원과목 이름으로 넣어 두면 자동으로 셉니다.</p></div>'
+      + '</tbody></table><p class="hint">한 블록 안에서 같은 정원과목 분반이 이 수를 넘지 않게 합니다. 비우면 제한하지 않습니다. 교사 계정의 「교과」를 정원과목 이름으로 넣어 두면 자동으로 셉니다.</p>'
+      + pairCard(byCredit) + '</div>'
       + '<div class="card tight"><div class="row"><h3>과목별 분반 기준</h3><span style="margin-left:auto"></span><label class="row small">모두 최소 <input id="ballmin" class="input sm w4" value="10"></label><label class="row small">최대 <input id="ballmax" class="input sm w4" value="35"></label><button class="btn sm" id="ball">적용</button></div>'
       + '<div class="tbl-wrap"><table class="tbl edit"><thead><tr><th>과목</th><th>학점</th><th>신청</th><th>정원과목</th><th>최소</th><th>최대</th><th>분반 수</th></tr></thead><tbody>'
       + BS.subjects.map((s, i) => '<tr' + (c[s.name] ? '' : ' class="dim"') + '><td>' + esc(s.name) + '</td><td class="num">' + s.credit + '</td><td class="num"><b>' + (c[s.name] || 0) + '</b></td>'
@@ -231,6 +292,7 @@
     t.querySelectorAll('[data-cap]').forEach((el) => { el.onchange = () => { BS.caps[el.dataset.cap] = el.value.trim(); BS.dirty = true; }; });
     t.querySelectorAll('[data-sj]').forEach((el) => { el.onchange = () => { BS.subjects[Number(el.dataset.sj)][el.dataset.k] = el.value.trim(); BS.dirty = true; if (el.dataset.k !== 'group') later(() => drawSet(t, body)); }; });
     t.querySelector('#ball').onclick = () => { const mn = t.querySelector('#ballmin').value, mx = t.querySelector('#ballmax').value; BS.subjects.forEach((s) => { s.min = mn; s.max = mx; }); BS.dirty = true; drawSet(t, body); };
+    bindPairCard(t, body, byCredit);
     const sv = t.querySelector('#bsolve');
     sv.onclick = () => {
       if (!included().length) { toast('대상 학생이 없습니다.', true); return; }
@@ -241,12 +303,92 @@
         prog.textContent = '계산 중…';
         const inp = engineInput(); inp.blocks = null;
         const r = await runWorker({ mode: 'solve', input: inp, opts: { iters: 4000, timeLimit: 25000 } }, (p) => { prog.textContent = (p.stage ? p.stage + ' · ' : '') + Math.round(100 * p.it / p.iters) + '%'; });
-        BK.assignRooms(r.sections, BS.rooms, false);
-        BS.result = r; BS.dirty = true; BS.tab = 'grid';
+        BS.result = r;
+        BK.assignRooms(r.sections, BS.rooms, false, r.blocks, slotBusy().rooms);
+        BS.dirty = true; BS.tab = 'grid';
         toast(r.ok ? '편성했습니다.' : '편성했지만 확인할 문제가 있습니다.', !r.ok);
         draw(body);
       });
     };
+  }
+
+  function pairCard(byCredit) {
+    const credits = Object.keys(byCredit).map(Number).sort((a, b) => b - a);
+    const half = (p) => pairHalves(p);
+    return '<h3 id="pairh">교차 묶음 <span class="muted small">(교사가 모자랄 때)</span></h3>'
+      + '<p class="hint">학급을 두 무리로 나누고 두 시간(①·②)을 엇갈려 씁니다. <b>공통+선택</b>: ① 앞무리는 공통과목(학급별), 뒷무리는 선택 블록 → ② 서로 바꿈. 공통과목 시간까지 선택 분반을 열 수 있어 한 시간에 필요한 교사가 줄어듭니다. '
+      + '<b>선택+선택</b>: 선택 블록 두 개를 무리별로 엇갈려, 한 과목 분반을 두 시간에 나눠 엽니다(시간이 늘지는 않음).</p>'
+      + (BS.pairs.length ? '<table class="mini edit"><thead><tr><th>종류</th><th>학점</th><th>공통과목</th><th>앞무리 반</th><th>뒷무리 반</th><th></th></tr></thead><tbody>'
+        + BS.pairs.map((p, i) => {
+          const hs = half(p);
+          const cms = BS.commons.filter((c) => c.credit === Number(p.credit));
+          return '<tr><td><select class="input sm" data-pk="type" data-pi="' + i + '"><option value="common"' + (p.type === 'common' ? ' selected' : '') + '>공통+선택</option><option value="elective"' + (p.type === 'elective' ? ' selected' : '') + '>선택+선택</option></select></td>'
+            + '<td><select class="input sm" data-pk="credit" data-pi="' + i + '">' + credits.map((c) => '<option' + (Number(p.credit) === c ? ' selected' : '') + '>' + c + '</option>').join('') + '</select></td>'
+            + '<td>' + (p.type === 'common' ? '<select class="input sm" data-pk="common" data-pi="' + i + '"><option value="">고르기</option>' + cms.map((c) => '<option value="' + esc(c.name) + '"' + (c.name === p.common ? ' selected' : '') + '>' + esc(c.name) + (c.group ? ' (' + esc(c.group) + ')' : '') + '</option>').join('') + '</select>' + (cms.length ? '' : '<span class="no small"> 이 학점 공통과목 없음</span>') : '<span class="muted">-</span>') + '</td>'
+            + '<td><input class="input sm w8" data-pk="h1" data-pi="' + i + '" value="' + esc(p.h1) + '" placeholder="예: 1-5"></td>'
+            + '<td class="small">' + (hs[1].length ? esc(classText(hs[1])) : '<span class="no">반을 나눠 주세요</span>') + '</td>'
+            + '<td><button class="btn sm dan" data-pdel="' + i + '">빼기</button></td></tr>';
+        }).join('') + '</tbody></table>' : '')
+      + '<div class="row"><button class="btn sm" id="padd">묶음 추가</button><button class="btn sm pri" id="prec">추천 받기</button><span class="muted small" id="pprog"></span></div>'
+      + (BS.pairs.length ? '<p class="hint">묶음을 바꾼 뒤에는 [다시 자동 편성]을 눌러 주세요. 시간표를 만들 때 묶음 시간은 한 덩어리(①·②)로 들어가고, 공통과목은 그 시간에 학급별로 표시됩니다.</p>' : '');
+  }
+  function bindPairCard(t, body, byCredit) {
+    const credits = Object.keys(byCredit).map(Number).sort((a, b) => b - a);
+    const redraw = () => setTimeout(() => drawSet(t, body), 0);
+    const def = () => { const h = BS.classNos; return classText(h.slice(0, Math.ceil(h.length / 2))); };
+    t.querySelector('#padd').onclick = () => {
+      const cr = credits[0] || 3, cm = BS.commons.find((c) => c.credit === cr);
+      BS.pairs.push({ type: cm ? 'common' : 'elective', credit: cr, common: cm ? cm.name : '', h1: def() }); BS.dirty = true; redraw();
+    };
+    t.querySelectorAll('[data-pk]').forEach((el) => {
+      el.onchange = () => {
+        const p = BS.pairs[Number(el.dataset.pi)];
+        p[el.dataset.pk] = el.dataset.pk === 'credit' ? Number(el.value) : el.value;
+        if (el.dataset.pk === 'h1') p.h1 = classText(parseClasses(el.value));
+        if (el.dataset.pk !== 'h1' && el.dataset.pk !== 'common') { const cm = BS.commons.find((c) => c.credit === Number(p.credit)); if (p.type === 'common' && !BS.commons.some((c) => c.name === p.common && c.credit === Number(p.credit))) p.common = cm ? cm.name : ''; }
+        BS.dirty = true; redraw();
+      };
+    });
+    t.querySelectorAll('[data-pdel]').forEach((b) => { b.onclick = () => { BS.pairs.splice(Number(b.dataset.pdel), 1); BS.dirty = true; redraw(); }; });
+    const rb = t.querySelector('#prec');
+    rb.onclick = () => {
+      if (!included().length) { toast('대상 학생이 없습니다.', true); return; }
+      const prog = t.querySelector('#pprog');
+      run(rb, async () => {
+        prog.textContent = '살펴보는 중…';
+        const r = await runWorker({ mode: 'recommend', input: engineInput(), opts: { timeLimit: 40000 } }, (p) => { prog.textContent = p.stage || ''; });
+        prog.textContent = '';
+        showRecommend(r, t, body);
+      });
+    };
+  }
+  function showRecommend(r, t, body) {
+    const B = r.base;
+    const desc = (p) => (p.type === 'common' ? '공통+선택 · ' + esc(p.common.name) + (p.common.group ? ' (' + esc(p.common.group) + ')' : '') : '선택+선택') + ' · ' + p.credit + '학점';
+    const res = (x) => (x.ok ? '<span class="pill ok">오류 없음</span>' : '<span class="pill err">오류 ' + x.errors + '</span>') + (x.unassigned ? ' <span class="pill warn">미배정 ' + x.unassigned + '명</span>' : '') + (x.over ? ' <span class="muted small">교사 초과 ' + x.over + '</span>' : '');
+    const good = r.options.filter((o) => o.better);
+    modal('<h2>교차 묶음 추천</h2>'
+      + '<p><b>지금</b> ' + res(B) + (r.shortGroups.length ? ' <span class="muted small">부족: ' + esc(r.shortGroups.join(', ')) + '</span>' : '') + '</p>'
+      + (B.ok ? '<div class="note ok">지금 설정으로도 교사·교실 문제가 없습니다. 묶음이 꼭 필요하지 않습니다.</div>' : '')
+      + (B.texts.length ? '<ul class="msgs">' + B.texts.map((x) => '<li class="error">' + esc(x) + '</li>').join('') + '</ul>' : '')
+      + (r.options.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>묶음</th><th>앞무리 / 뒷무리</th><th>시험 편성 결과</th><th></th></tr></thead><tbody>'
+        + r.options.map((o, i) => '<tr' + (i === 0 && o.better ? ' class="best"' : '') + '><td>' + (i === 0 && o.better ? '<span class="pill pri">추천</span> ' : '') + desc(o.pair) + '<br><span class="muted small">' + esc(o.slots.join(' · ')) + '</span></td>'
+          + '<td class="small">' + esc(classText(o.pair.halves[0])) + '반 / ' + esc(classText(o.pair.halves[1])) + '반 (' + esc(o.pair.split) + ')</td>'
+          + '<td>' + res(o.result) + '</td><td><button class="btn sm' + (o.better ? ' pri' : '') + '" data-ruse="' + i + '">이 묶음 쓰기</button></td></tr>').join('') + '</tbody></table></div>'
+        : '<div class="empty">시험해 볼 묶음 후보가 없습니다. 같은 학점의 공통과목이 이번 학기에 있는지 확인해 주세요.</div>')
+      + (r.options.length && !good.length && !B.ok ? '<div class="note warn">어떤 묶음도 오류를 줄이지 못했습니다. 교사 수(동시 가능)·최대 인원·교실을 먼저 조정해 보세요.</div>' : '')
+      + '<p class="hint">각 후보를 짧게 시험 편성한 결과입니다(실제 편성은 [다시 자동 편성]에서 더 오래 계산합니다). 공통과목 교사는 무리 학급 수만큼 같은 시간에 필요합니다.</p>'
+      + '<div class="row" style="justify-content:flex-end"><button class="btn" data-close>닫기</button></div>', (bg, close) => {
+      bg.querySelectorAll('[data-ruse]').forEach((b) => {
+        b.onclick = () => {
+          const o = r.options[Number(b.dataset.ruse)];
+          BS.pairs.push({ type: o.pair.type, credit: o.pair.credit, common: o.pair.common ? o.pair.common.name : '', h1: classText(o.pair.halves[0]) });
+          BS.dirty = true; close(); drawSet(t, body);
+          toast('묶음을 넣었습니다. [다시 자동 편성]을 눌러 주세요.');
+          const sv = t.querySelector('#bsolve'); if (sv) sv.scrollIntoView({ block: 'center' });
+        };
+      });
+    }, { wide: true });
   }
 
   /* ---------- 2. 편성·교실 ---------- */
@@ -258,6 +400,7 @@
     const hasNone = res.sections.some((s) => !s.room);
     const issues = (res.issues || []).filter((x) => x.level === 'info').concat(check());
     const sizes = res.sections.map((s) => s.students.length);
+    const busy = slotBusy();
     t.innerHTML = '<div class="card tight"><div class="row"><h3>점검</h3>' + (issues.some((x) => x.level === 'error') ? '' : '<span class="pill ok">오류 없음</span>')
       + '<span class="muted small">분반 ' + res.sections.length + '개 · 인원 ' + (sizes.length ? Math.min(...sizes) + '~' + Math.max(...sizes) : '-') + '명</span><span style="margin-left:auto"></span>'
       + '<button class="btn sm" id="brm">교실 다시 배치</button><button class="btn sm" id="btc">교사 자동 배정</button><button class="btn sm" id="bre">학생 다시 배정</button></div>'
@@ -266,14 +409,15 @@
       + res.blocks.map((b) => {
         const inB = res.sections.map((s, i) => [s, i]).filter((x) => x[0].block === b.id);
         const cell = (list) => list.map(([s, i]) => '<button type="button" class="sec" data-sec="' + i + '" style="border-left-color:' + colorOf(s.group || s.subject) + '"><b>' + esc(s.subject) + '</b><small>' + esc(s.label) + ' · ' + s.students.length + '명' + (s.teacherId ? ' · ' + esc(teacherName(s.teacherId)) : '') + '</small></button>').join('');
-        return '<tr><th><b>' + esc(b.id) + '</b><br><span class="muted small">' + b.credit + '학점 · ' + inB.length + '반</span></th>'
-          + cols.map((r) => '<td>' + cell(inB.filter((x) => x[0].room === r)) + '</td>').join('') + (hasNone ? '<td>' + cell(inB.filter((x) => !x[0].room)) + '</td>' : '') + '</tr>';
+        const note = blockNote(b), sl = b.slot || b.id, occ = busy.rooms[sl] || [];
+        return '<tr' + (note ? ' class="paired"' : '') + '><th><b>' + esc(b.id) + '</b><br><span class="muted small">' + b.credit + '학점 · ' + inB.length + '반</span>' + (note ? '<br><span class="small pairnote">' + esc(note) + '</span>' : '') + '</th>'
+          + cols.map((r) => '<td>' + (occ.includes(r) && !inB.some((x) => x[0].room === r) ? '<span class="occ">' + esc((busy.labels[sl] || {})[r] || '공통과목') + '</span>' : '') + cell(inB.filter((x) => x[0].room === r)) + '</td>').join('') + (hasNone ? '<td>' + cell(inB.filter((x) => !x[0].room)) + '</td>' : '') + '</tr>';
       }).join('') + '</tbody></table></div><p class="hint">분반을 누르면 블록·교실·교사를 바꿀 수 있습니다. 블록을 옮기면 학생을 다시 배정합니다. 같은 색은 같은 정원과목입니다.</p></div>';
-    t.querySelector('#brm').onclick = () => { BK.assignRooms(res.sections, BS.rooms, false); BS.dirty = true; draw(body); };
+    t.querySelector('#brm').onclick = () => { BK.assignRooms(res.sections, BS.rooms, false, res.blocks, busy.rooms); BS.dirty = true; draw(body); };
     t.querySelector('#btc').onclick = () => {
       const by = {}; BS.d.teachers.forEach((x) => { if (x.subject) (by[x.subject] = by[x.subject] || []).push(x); });
       const before = res.sections.filter((s) => s.teacherId).length;
-      BK.assignTeachers(res.sections, by, before > 0 && confirm('이미 정한 교사는 그대로 두고 빈 분반만 채울까요? (취소하면 모두 새로 배정)'));
+      BK.assignTeachers(res.sections, by, before > 0 && confirm('이미 정한 교사는 그대로 두고 빈 분반만 채울까요? (취소하면 모두 새로 배정)'), res.blocks);
       BS.dirty = true; draw(body);
       const none = res.sections.filter((s) => !s.teacherId).length;
       toast(none ? '교사를 정하지 못한 분반 ' + none + '개 (그 정원과목 교사 계정이 없거나 부족)' : '교사를 배정했습니다.', !!none);
@@ -290,8 +434,8 @@
       const key = (s) => s.subject + '|' + s.block + '|' + s.no;
       const prev = {}; old.forEach((s) => { prev[key(s)] = s; });
       r.sections.forEach((s) => { const p = prev[key(s)]; if (p) { s.room = p.room; s.teacherId = p.teacherId; } });
-      BK.assignRooms(r.sections, BS.rooms, true);
-      r.blocks = res.blocks;
+      r.blocks = res.blocks; r.pairs = res.pairs;
+      BK.assignRooms(r.sections, BS.rooms, true, r.blocks, slotBusy().rooms);
       BS.result = r; BS.dirty = true;
       toast(r.unassigned.length ? '배정하지 못한 학생 ' + r.unassigned.length + '명이 있습니다.' : '학생을 다시 배정했습니다.', !!r.unassigned.length);
       draw(body);
@@ -300,14 +444,16 @@
   function editSection(i, body) {
     const res = BS.result, s = res.sections[i];
     const blocks = res.blocks.filter((b) => b.credit === s.credit);
-    const usedRooms = {}; res.sections.forEach((x, k) => { if (k !== i && x.block === s.block && x.room) usedRooms[x.room] = x; });
+    const sl0 = slotOf(s.block);
+    const usedRooms = {}; res.sections.forEach((x, k) => { if (k !== i && slotOf(x.block) === sl0 && x.room) usedRooms[x.room] = x; });
+    const occRooms = slotBusy().rooms[sl0] || [];
     const ts = BS.d.teachers.slice().sort((a, b) => (b.subject === s.group) - (a.subject === s.group) || (a.name < b.name ? -1 : 1));
-    const busy = {}; res.sections.forEach((x, k) => { if (k !== i && x.block === s.block && x.teacherId) busy[x.teacherId] = 1; });
+    const busy = {}; res.sections.forEach((x, k) => { if (k !== i && slotOf(x.block) === sl0 && x.teacherId) busy[x.teacherId] = 1; });
     const sm = stuById();
     modal('<h2>' + esc(s.subject) + ' ' + esc(s.label) + '</h2><p class="muted">' + s.credit + '학점 · ' + s.students.length + '명 · 정원과목 ' + esc(s.group || '-') + '</p>'
-      + '<div class="grid2 tight2"><div class="field"><label for="es1">블록</label><select id="es1" class="input">' + blocks.map((b) => '<option' + (b.id === s.block ? ' selected' : '') + '>' + esc(b.id) + '</option>').join('') + '</select></div>'
-      + '<div class="field"><label for="es2">교실</label><select id="es2" class="input"><option value="">(미정)</option>' + BS.rooms.map((r) => '<option value="' + esc(r) + '"' + (r === s.room ? ' selected' : '') + '>' + esc(r) + (usedRooms[r] ? ' — ' + esc(usedRooms[r].subject) + ' ' + esc(usedRooms[r].label) + '와 바꾸기' : '') + '</option>').join('') + '</select></div></div>'
-      + '<div class="field"><label for="es3">교사</label><select id="es3" class="input"><option value="">(미정)</option>' + ts.map((x) => '<option value="' + esc(x.id) + '"' + (x.id === s.teacherId ? ' selected' : '') + (busy[x.id] ? ' disabled' : '') + '>' + esc(x.name) + (x.subject ? ' · ' + esc(x.subject) : '') + (busy[x.id] ? ' (이 블록 수업 있음)' : '') + '</option>').join('') + '</select></div>'
+      + '<div class="grid2 tight2"><div class="field"><label for="es1">블록</label><select id="es1" class="input">' + blocks.map((b) => '<option value="' + esc(b.id) + '"' + (b.id === s.block ? ' selected' : '') + '>' + esc(b.id) + (blockNote(b) ? ' — ' + esc(blockNote(b)) : '') + '</option>').join('') + '</select></div>'
+      + '<div class="field"><label for="es2">교실</label><select id="es2" class="input"><option value="">(미정)</option>' + BS.rooms.map((r) => '<option value="' + esc(r) + '"' + (r === s.room ? ' selected' : '') + (occRooms.includes(r) ? ' disabled' : '') + '>' + esc(r) + (occRooms.includes(r) ? ' (공통과목 학급 수업 중)' : usedRooms[r] ? ' — ' + esc(usedRooms[r].subject) + ' ' + esc(usedRooms[r].label) + '와 바꾸기' : '') + '</option>').join('') + '</select></div></div>'
+      + '<div class="field"><label for="es3">교사</label><select id="es3" class="input"><option value="">(미정)</option>' + ts.map((x) => '<option value="' + esc(x.id) + '"' + (x.id === s.teacherId ? ' selected' : '') + (busy[x.id] ? ' disabled' : '') + '>' + esc(x.name) + (x.subject ? ' · ' + esc(x.subject) : '') + (busy[x.id] ? ' (이 시간 수업 있음)' : '') + '</option>').join('') + '</select></div>'
       + '<details><summary>학생 ' + s.students.length + '명</summary><div class="small">' + s.students.map((id) => sm[id] ? esc(sm[id].grade + '-' + sm[id].classNo + ' ' + sm[id].name) : esc(id)).join(', ') + '</div></details>'
       + '<p class="hint">블록을 바꾸면 이 과목을 고른 학생들이 다시 배정됩니다.</p>'
       + '<div class="row" style="justify-content:flex-end"><button class="btn" id="esadd">같은 블록에 이 과목 분반 추가</button><span style="flex:1"></span><button class="btn" data-close>취소</button><button class="btn pri" id="esok">적용</button></div>', (bg, close) => {

@@ -25,7 +25,7 @@
 
   // 학교(Workspace) 계정 주소 /a/macros/도메인/s/… 는 로그인을 요구하므로 일반 주소로 바꿔 씁니다.
   function apiUrl() { return String(CFG.API_URL || '').trim().replace(/\/a\/macros\/[^/]+\/s\//, '/macros/s/'); }
-  const WEB_VERSION = '0.5.6';
+  const WEB_VERSION = '0.5.7';
   /* 같은 화면을 오가며 같은 자료를 다시 부를 때 30초 동안은 저장본을 씀. 무언가를 저장·변경하면 저장본을 모두 비움 */
   const READ_CACHE = new Set(['settingsGet', 'studentList', 'teacherList', 'selRounds', 'curGet', 'selStatus', 'blockList', 'blockData', 'demandData',
     'ttVersions', 'ttView', 'ttData', 'noticeList', 'pushConfig', 'opsDay', 'opsList', 'retentionGet', 'dataCounts', 'selHome']);

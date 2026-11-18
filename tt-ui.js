@@ -154,7 +154,10 @@
       + '<h3>교시 시간</h3><div class="row">' + Array.from({ length: 9 }, (_, i) => '<label class="field small">' + (i + 1) + '교시<input class="input sm w8" data-time="' + i + '" value="' + esc((set.times || [])[i] || '') + '" placeholder="08:40-09:30"></label>').join('') + '</div></div>'
       + '<div class="card tight"><h3>학년별 시수</h3><table class="mini"><thead><tr><th>학년</th><th>입학년도</th><th>학급</th><th>지정</th><th>블록</th><th>고정</th><th>합계</th></tr></thead><tbody>'
       + d.grades.map((g) => {
-        const des = g.subjects.reduce((a, s) => a + s.hours, 0), blk = g.plan ? g.plan.blocks.reduce((a, x) => a + Number(x.credit), 0) : 0, fx = fixedH(g.grade), tot = des + blk + fx;
+        // 교차 묶음은 같은 시간(slot)을 한 번만, 묶음에 들어간 공통과목 시수는 빼고 셈
+        const slotCr = {}; if (g.plan) g.plan.blocks.forEach((x) => { slotCr[x.slot || x.id] = Number(x.credit); });
+        const pairedCommon = g.plan ? (g.plan.pairs || []).filter((p) => p.common).reduce((a, p) => a + Number(p.credit), 0) : 0;
+        const des = g.subjects.reduce((a, s) => a + s.hours, 0) - pairedCommon, blk = Object.values(slotCr).reduce((a, x) => a + x, 0), fx = fixedH(g.grade), tot = des + blk + fx;
         return '<tr><td>' + g.grade + '학년</td><td>' + esc(g.cohort) + '</td><td>' + g.classes + '</td><td class="num">' + des + '</td><td class="num">' + blk + (g.plan ? ' <span class="muted small">' + esc(g.plan.status) + '</span>' : (g.classes ? ' <span class="no small">편성 없음</span>' : '')) + '</td><td class="num">' + fx + '</td><td class="num ' + (tot > slotCount() ? 'no' : '') + '"><b>' + tot + '</b></td></tr>';
       }).join('') + '</tbody></table><p class="hint">지정: 교육과정의 지정 과목(학급 단위). 블록: [블록 편성]에서 저장한 학년 전체 선택 과목. 학급 수와 교실은 [관리 → 학급 설정] 기준입니다.</p>'
       + '<div class="row"><h3>고정 수업</h3><span style="margin-left:auto"></span><button class="btn sm" id="fxadd">추가</button></div>'
