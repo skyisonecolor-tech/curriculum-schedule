@@ -25,7 +25,7 @@
 
   // 학교(Workspace) 계정 주소 /a/macros/도메인/s/… 는 로그인을 요구하므로 일반 주소로 바꿔 씁니다.
   function apiUrl() { return String(CFG.API_URL || '').trim().replace(/\/a\/macros\/[^/]+\/s\//, '/macros/s/'); }
-  const WEB_VERSION = '0.5.7';
+  const WEB_VERSION = '0.5.9';
   /* 같은 화면을 오가며 같은 자료를 다시 부를 때 30초 동안은 저장본을 씀. 무언가를 저장·변경하면 저장본을 모두 비움 */
   const READ_CACHE = new Set(['settingsGet', 'studentList', 'teacherList', 'selRounds', 'curGet', 'selStatus', 'blockList', 'blockData', 'demandData',
     'ttVersions', 'ttView', 'ttData', 'noticeList', 'pushConfig', 'opsDay', 'opsList', 'retentionGet', 'dataCounts', 'selHome']);
@@ -116,6 +116,18 @@
     const f = bg.querySelector('button, input'); if (f) f.focus();
     return close;
   }
+
+  /* ---------- 학년 표시 통일 ----------
+   * 기준 학년도 = [관리 → 학급 설정]의 학년도(올해). 수강신청·블록 편성은 보통 내년 자료, 시간표·일과 운영·학생 계정은 올해 자료.
+   * 내년 자료의 학년 옆에는 늘 「현 N학년」(지금 학년)을 붙여, 어느 화면에서나 같은 학생을 같은 이름으로 찾게 함 */
+  const curYear = () => Number(ui.year) || new Date().getFullYear();
+  function yearTag(y) { const d = Number(y) - curYear(); return d === 0 ? '올해' : d === 1 ? '내년' : d === -1 ? '작년' : ''; }
+  function nowGrade(year, grade) {
+    const g = Number(grade) - (Number(year) - curYear());
+    if (Number(year) === curYear()) return '';
+    return g >= 1 && g <= 3 ? '현 ' + g + '학년' : g < 1 ? '입학 예정' : '졸업';
+  }
+  function gradeLabel(year, grade) { const n = nowGrade(year, grade); return grade + '학년' + (n ? ' (' + n + ')' : ''); }
 
   /* ---------- 필요할 때만 불러오는 도구(엑셀 880KB·QR) ---------- */
   const libs = {};
@@ -593,7 +605,7 @@
     const g = (n) => d.grades.find((x) => String(x.학년) === String(n)) || {};
     v.innerHTML = '<div class="card" style="max-width:760px"><h2>학년·학급 설정</h2>'
       + '<div class="grid2"><div class="field"><label for="sn">학교 이름</label><input id="sn" class="input" value="' + esc(d.schoolName) + '"></div>'
-      + '<div class="field"><label for="sy">학년도</label><input id="sy" class="input" inputmode="numeric" value="' + esc(d.year) + '"></div></div>'
+      + '<div class="field"><label for="sy">학년도 (올해)</label><input id="sy" class="input" inputmode="numeric" value="' + esc(d.year) + '"><span class="hint">모든 화면의 기준입니다. 학생 계정·시간표·일과 운영은 이 학년도, 수강신청·블록 편성은 보통 다음 학년도를 다룹니다. 다음 학년도 자료의 학년 옆에는 「현 N학년」이 함께 표시됩니다. 학년도는 [학년도 전환]으로 바꾸세요.</span></div></div>'
       + '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>학년</th><th>학급 수 (= 블록당 교실 수)</th><th>교실 (쉼표로 구분)</th></tr></thead><tbody>'
       + [1, 2, 3].map((n) => '<tr><td>' + n + '학년</td><td><input class="input sm" style="width:80px" data-gn="' + n + '" inputmode="numeric" value="' + esc(g(n).학급수 || 11) + '"></td>'
         + '<td><input class="input sm" style="width:100%" data-gr="' + n + '" value="' + esc(g(n).교실 || Array.from({ length: Number(g(n).학급수 || 11) }, (_, i) => n * 100 + i + 1).join(',')) + '"></td></tr>').join('')
@@ -955,7 +967,7 @@
   }
 
   /* ---------- 다른 파일(sel.js)과 함께 쓰는 도구 ---------- */
-  window.APP = { api, esc, toast, run, modal, saveBlob, render, renderHome, VIEWS, isAdmin, canViewAll, CFG, resetData, confirmTyped, needXLSX, clearReadCache,
+  window.APP = { api, esc, toast, run, modal, saveBlob, render, renderHome, VIEWS, isAdmin, canViewAll, CFG, resetData, confirmTyped, needXLSX, clearReadCache, yearTag, nowGrade, gradeLabel, curYear,
     get S() { return S; }, get ui() { return ui; }, MODE };
   async function loadRounds() {
     if (!S.user || S.user.kind !== 'student') return;

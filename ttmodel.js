@@ -19,6 +19,10 @@ var TTM = (function () {
         if (!p.common) return;
         p.halves.forEach(function (h) { h.forEach(function (cls) { var k = g.grade + '-' + cls + '|' + p.common.name; minus[k] = (minus[k] || 0) + Number(p.credit); }); });
       });
+      // 과목 묶음에 들어간 공통과목(예: 스포츠 문화)은 블록 안에서 들으므로 학급별 시수에서 뺌(같은 공통과목은 한 번만)
+      var bc = {};
+      ((g.plan && g.plan.bundles) || []).forEach(function (b) { (b.items || []).forEach(function (it) { if (it.kind === 'common') bc[it.name] = Number(it.credit) || 0; }); });
+      Object.keys(bc).forEach(function (n) { ck.forEach(function (c) { var k = c.key + '|' + n; minus[k] = (minus[k] || 0) + bc[n]; }); });
       ck.forEach(function (c) {
         (g.subjects || []).forEach(function (s) {
           var hrs = Number(s.hours) - (minus[c.key + '|' + s.name] || 0);
@@ -35,7 +39,7 @@ var TTM = (function () {
           var bl = bySlot[sl], ids = bl.map(function (b) { return b.id; });
           var secs = g.plan.sections.filter(function (x) { return ids.indexOf(x.block) >= 0; });
           var ts = [], rs = [];
-          secs.forEach(function (x) { if (x.teacherId && ts.indexOf(x.teacherId) < 0) ts.push(x.teacherId); if (x.room && rs.indexOf(x.room) < 0) rs.push(x.room); });
+          secs.forEach(function (x) { [x.teacherId, x.teacherId2].forEach(function (t) { if (t && ts.indexOf(t) < 0) ts.push(t); }); if (x.room && rs.indexOf(x.room) < 0) rs.push(x.room); });
           var perClass = null, label = sl + ' 블록';
           pairs.forEach(function (p) {
             p.slots.forEach(function (s) {
@@ -120,7 +124,7 @@ var TTM = (function () {
     var assign = keep ? Object.assign({}, set.assign || {}) : {};
     var load = {};
     d.teachers.forEach(function (t) { load[t.id] = 0; });
-    d.grades.forEach(function (g) { if (g.plan) g.plan.sections.forEach(function (x) { if (x.teacherId) load[x.teacherId] = (load[x.teacherId] || 0) + (Number(x.credit) || 0); }); });
+    d.grades.forEach(function (g) { if (g.plan) g.plan.sections.forEach(function (x) { if (x.teacherId) load[x.teacherId] = (load[x.teacherId] || 0) + (Number(x.credit) || 0); if (x.teacherId2) load[x.teacherId2] = (load[x.teacherId2] || 0) + 1; }); });
     var classes = classesFrom(d);
     Object.keys(assign).forEach(function (k) {
       var g = k.split('-')[0], name = k.split('|')[1];

@@ -103,7 +103,11 @@
 
   VIEWS.ttbuild = async function (v) {
     const ui = A.ui;
-    const year = ui.tbYear || String((Number(ui.year) || new Date().getFullYear()) + 1), term = ui.tbTerm || '1';
+    if (!ui.tbYear) {
+      // 올해 시간표가 게시되어 있으면 내년(수강신청·블록 편성으로 만드는 시간표), 아니면 올해부터
+      try { const vers = await api('ttVersions', {}); ui.tbYear = String(A.curYear() + (vers.some((x) => String(x.year) === String(A.curYear()) && x.status === '게시') ? 1 : 0)); } catch (e) { ui.tbYear = String(A.curYear() + 1); }
+    }
+    const year = ui.tbYear, term = ui.tbTerm || '1';
     if (!TB || TB.d.year !== year || TB.d.term !== term) {
       loading(v);
       let d;
@@ -117,7 +121,7 @@
   function drawTB(v) {
     const ui = A.ui, d = TB.d;
     const tabs = [['base', '1. 기본 설정'], ['assign', '2. 담당 교사'], ['unav', '3. 불가 시간'], ['gen', '4. 생성·수정'], ['pub', '5. 저장·게시']];
-    v.innerHTML = '<div class="card tight"><div class="row"><h2>시간표 편성</h2><label class="row small">학년도 <input id="tby" class="input sm w4" value="' + esc(d.year) + '"></label>'
+    v.innerHTML = '<div class="card tight"><div class="row"><h2>시간표 편성</h2><label class="row small">학년도 <select id="tby" class="input sm">' + [A.curYear(), A.curYear() + 1].concat([Number(d.year)].filter((y) => y !== A.curYear() && y !== A.curYear() + 1)).map((y) => '<option value="' + y + '"' + (String(y) === String(d.year) ? ' selected' : '') + '>' + y + (A.yearTag(y) === '올해' ? ' (올해 · 지금 운영)' : A.yearTag(y) === '내년' ? ' (내년 · 학년도 전환 때 올해 시간표로)' : '') + '</option>').join('') + '</select></label>'
       + '<select id="tbt" class="input sm"><option value="1"' + (d.term === '1' ? ' selected' : '') + '>1학기</option><option value="2"' + (d.term === '2' ? ' selected' : '') + '>2학기</option></select>'
       + (TB.status ? '<span class="pill ' + (TB.status === '게시' ? 'ok' : 'warn') + '">' + esc(TB.status) + '</span>' : '<span class="pill">저장 전</span>') + (TB.dirty ? '<span class="pill warn dirtyp">저장 안 됨</span>' : '')
       + '<span style="margin-left:auto"></span><button class="btn sm" id="tbsave">저장</button></div>'
@@ -158,7 +162,7 @@
         const slotCr = {}; if (g.plan) g.plan.blocks.forEach((x) => { slotCr[x.slot || x.id] = Number(x.credit); });
         const pairedCommon = g.plan ? (g.plan.pairs || []).filter((p) => p.common).reduce((a, p) => a + Number(p.credit), 0) : 0;
         const des = g.subjects.reduce((a, s) => a + s.hours, 0) - pairedCommon, blk = Object.values(slotCr).reduce((a, x) => a + x, 0), fx = fixedH(g.grade), tot = des + blk + fx;
-        return '<tr><td>' + g.grade + '학년</td><td>' + esc(g.cohort) + '</td><td>' + g.classes + '</td><td class="num">' + des + '</td><td class="num">' + blk + (g.plan ? ' <span class="muted small">' + esc(g.plan.status) + '</span>' : (g.classes ? ' <span class="no small">편성 없음</span>' : '')) + '</td><td class="num">' + fx + '</td><td class="num ' + (tot > slotCount() ? 'no' : '') + '"><b>' + tot + '</b></td></tr>';
+        return '<tr><td>' + esc(A.gradeLabel(TB.d.year, g.grade)) + '</td><td>' + esc(g.cohort) + '</td><td>' + g.classes + '</td><td class="num">' + des + '</td><td class="num">' + blk + (g.plan ? ' <span class="muted small">' + esc(g.plan.status) + '</span>' : (g.classes ? ' <span class="no small">편성 없음</span>' : '')) + '</td><td class="num">' + fx + '</td><td class="num ' + (tot > slotCount() ? 'no' : '') + '"><b>' + tot + '</b></td></tr>';
       }).join('') + '</tbody></table><p class="hint">지정: 교육과정의 지정 과목(학급 단위). 블록: [블록 편성]에서 저장한 학년 전체 선택 과목. 학급 수와 교실은 [관리 → 학급 설정] 기준입니다.</p>'
       + '<div class="row"><h3>고정 수업</h3><span style="margin-left:auto"></span><button class="btn sm" id="fxadd">추가</button></div>'
       + '<table class="mini edit"><thead><tr><th>이름</th><th>학년</th><th>시수</th><th>고정 시간 (예: 금6, 금7)</th><th></th></tr></thead><tbody>'
@@ -194,7 +198,7 @@
       + '<p class="hint">정원과목이 같은 교사(교사 계정의 「교과」)에게 이어진 반을 고르게 나눕니다. 블록 편성에서 맡은 분반 시수도 함께 셉니다.</p></div>'
       + '<div class="grid-tb"><div>' + d.grades.filter((g) => g.subjects.length && g.classes).map((g) => {
         const ck = classes.filter((c) => c.grade === g.grade);
-        return '<div class="card tight"><h3>' + g.grade + '학년</h3><div class="tbl-wrap"><table class="tbl edit"><thead><tr><th>과목</th>' + ck.map((c) => '<th>' + c.cls + '반</th>').join('') + '</tr></thead><tbody>'
+        return '<div class="card tight"><h3>' + esc(A.gradeLabel(TB.d.year, g.grade)) + '</h3><div class="tbl-wrap"><table class="tbl edit"><thead><tr><th>과목</th>' + ck.map((c) => '<th>' + c.cls + '반</th>').join('') + '</tr></thead><tbody>'
           + g.subjects.map((s) => '<tr><td><b>' + esc(s.name) + '</b><br><span class="muted small">' + s.hours + '시간 · ' + esc(s.group || '-') + '</span></td>'
             + ck.map((c) => '<td><select class="input sm asel" data-as="' + esc(c.key + '|' + s.name) + '">' + opt(s.group, set.assign[c.key + '|' + s.name]) + '</select></td>').join('') + '</tr>').join('')
           + '</tbody></table></div></div>';

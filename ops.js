@@ -171,6 +171,8 @@
       + '<h3>3. ' + p.to + '학년도 학급</h3><table class="mini edit"><thead><tr><th>학년</th><th>학급 수</th><th>교실 (쉼표)</th></tr></thead><tbody>'
       + cls.map((c, i) => '<tr><td>' + c.grade + '학년</td><td><input class="input sm w4" data-yc="' + i + '" value="' + esc(c.classes) + '"></td><td><input class="input sm wide" data-yr="' + i + '" value="' + esc(c.rooms) + '"></td></tr>').join('') + '</tbody></table>'
       + '<label class="ck"><input type="checkbox" id="yhr" checked> 교사 담임 지정 지우기 (새 담임은 [교사 계정]에서 지정)</label>'
+      + (p.timetables.some((t) => String(t.term) === '1') ? '<label class="ck"><input type="checkbox" id="ytt" checked> ' + p.to + '학년도 1학기 시간표(수강신청·블록 편성으로 만든 시간표)를 <b>올해 시간표</b>로 게시 — 적용 시작일이 없으면 오늘부터</label>'
+        : '<div class="note warn small">' + p.to + '학년도 시간표가 아직 없습니다. 전환 뒤 [시간표 → 시간표 편성]에서 만들어 게시하면 올해 시간표가 됩니다.</div>')
       + '<div class="row" style="justify-content:flex-end"><button class="btn pri" id="ygo"' + (p.errors.length ? ' disabled' : '') + '>' + p.to + '학년도로 전환</button></div></div></div>';
     v.querySelector('#yto').onchange = (e) => { ui.yrTo = e.target.value; ui.yrRows = []; VIEWS.year(v); };
     v.querySelectorAll('[data-yc]').forEach((el) => { el.onchange = () => { cls[Number(el.dataset.yc)].classes = Number(el.value) || 0; }; });
@@ -192,9 +194,9 @@
     v.querySelector('#ygo').onclick = (e) => {
       if (!confirm(p.from + '학년도 → ' + p.to + '학년도로 전환합니다.\n졸업 ' + p.graduate + '명, 진급·신입 ' + (p.promote + p.freshmen) + '명.\n실행 전에 자동으로 백업합니다. 계속할까요?')) return;
       run(e.target, async () => {
-        const r = await api('yearApply', { year: ui.yrTo, rows: ui.yrRows || [], classes: cls.map((c) => ({ grade: c.grade, classes: c.classes, rooms: String(c.rooms).split(/[,\s]+/).filter(Boolean) })), clearHomeroom: v.querySelector('#yhr').checked });
+        const r = await api('yearApply', { year: ui.yrTo, rows: ui.yrRows || [], classes: cls.map((c) => ({ grade: c.grade, classes: c.classes, rooms: String(c.rooms).split(/[,\s]+/).filter(Boolean) })), clearHomeroom: v.querySelector('#yhr').checked, publishTimetable: !!(v.querySelector('#ytt') && v.querySelector('#ytt').checked) });
         ui.year = String(r.to); ui.yrRows = []; ui.yrClasses = null; ui.yrTo = String(r.to + 1);
-        modal('<h2>' + r.to + '학년도로 전환했습니다</h2><ul><li>졸업 ' + r.graduate + '명</li><li>진급 ' + r.promote + '명 · 신입 ' + r.freshmen + '명</li><li>새 반 배정 ' + r.matched + '명</li></ul>'
+        modal('<h2>' + r.to + '학년도로 전환했습니다</h2><ul><li>졸업 ' + r.graduate + '명</li><li>진급 ' + r.promote + '명 · 신입 ' + r.freshmen + '명</li><li>새 반 배정 ' + r.matched + '명</li>' + (r.timetable ? '<li>올해 시간표: ' + esc(r.timetable) + '</li>' : '') + '</ul>'
           + '<h3>이어서 할 일</h3><ol class="small"><li>[학생 → 명렬]에서 학년별 명렬을 확인합니다. 새 반 배정을 안 올렸다면 지금 학년 단위 교체로 올립니다.</li><li>[관리 → 교사 계정]에서 새 담임을 지정합니다.</li><li>[학생 → 신입생]에서 신입생 이름 명렬을 올리고 개별 코드 쪽지를 출력합니다.</li><li>[시간표 → 시간표 편성]에서 새 학년도 시간표가 게시되어 있는지 확인합니다.</li></ol>'
           + '<div class="row" style="justify-content:flex-end"><button class="btn pri" data-close>확인</button></div>');
         A.renderHome();

@@ -18,8 +18,10 @@ var BLOCK = (function () {
   function prepare(input) {
     var subs = [], byName = {};
     (input.subjects || []).forEach(function (s) {
-      var o = { name: String(s.name), credit: Number(s.credit) || 0, group: String(s.group || ''), min: Math.max(0, Number(s.min) || 0),
-        max: Math.max(1, Number(s.max) || 35), sections: Number(s.sections) || 0, count: 0, locked: s.locked || null };
+      // groups: 과목 묶음(예: 스포츠 문화 1 + 미술 창작 2)은 한 분반에 여러 정원과목 교사가 들어가므로 정원과목 여러 개
+      var gs = (s.groups && s.groups.length ? s.groups : [s.group]).map(String).filter(Boolean).filter(function (g, i, a) { return a.indexOf(g) === i; });
+      var o = { name: String(s.name), credit: Number(s.credit) || 0, group: String(s.group || gs[0] || ''), groups: gs, min: Math.max(0, Number(s.min) || 0),
+        max: Math.max(1, Number(s.max) || 35), sections: Number(s.sections) || 0, count: 0, locked: s.locked || null, partCredits: s.partCredits || null };
       byName[o.name] = subs.length; subs.push(o);
     });
     var students = [], issues = [];
@@ -71,7 +73,7 @@ var BLOCK = (function () {
         issues.push({ level: 'error', text: cr + '학점 과목의 분반이 ' + ns + '개인데 ' + (slotList.length !== nb ? '시간 ' + slotList.length + '개의 빈 교실' : '블록 ' + nb + '개 × 교실 ' + R + '개') + ' = ' + seats + '자리뿐입니다. 최대 인원을 늘리거나 교실을 추가해 주세요.' + (hint.length ? ' 도움말: ' + hint.join(', ') : '') });
       }
       var byG = {};
-      subs.forEach(function (s) { if (s.credit === cr && s.group) byG[s.group] = (byG[s.group] || 0) + s.sections; });
+      subs.forEach(function (s) { if (s.credit === cr) s.groups.forEach(function (g) { byG[g] = (byG[g] || 0) + s.sections; }); });
       Object.keys(byG).forEach(function (g) {
         var room = slotList.reduce(function (a, sl) { return a + Math.max(0, (cap0[g] || 0) - (((PP.occ[sl] || {}).groups || {})[g] || 0)); }, 0);
         if (cap0[g] && byG[g] > room) issues.push({ level: 'error', short: { group: g, credit: cr, need: byG[g], room: room }, text: g + ' 분반이 ' + byG[g] + '개인데 ' + g + ' 교사 ' + cap0[g] + '명 × ' + cr + '학점 ' + (slotList.length !== nb ? '시간 ' + slotList.length + '개' : '블록 ' + nb + '개') + '로는 ' + room + '개까지만 열 수 있습니다. 교사 수·최대 인원을 늘리거나 [교차 묶음]을 써 보세요.' });
@@ -165,8 +167,7 @@ var BLOCK = (function () {
         var x = this.cnt[j][b];
         if (!x) continue;
         n[sl] += x;
-        var gr = M.subs[j].group;
-        if (gr && M.cap[gr]) g[sl][gr] = (g[sl][gr] || 0) + x;
+        M.subs[j].groups.forEach(function (gr) { if (M.cap[gr]) g[sl][gr] = (g[sl][gr] || 0) + x; });
       }
     }
     for (var s = 0; s < S; s++) {
@@ -245,14 +246,14 @@ var BLOCK = (function () {
     var halfDemand = M.blocks.map(function (bb, b) { return M.subs.map(function (s, j) { var n = 0; St.byStu[j].forEach(function (si) { if (M.students[si].allow[b]) n++; }); return n; }); });
     order.forEach(function (j) {
       var s = M.subs[j];
-      if (s.locked) { Object.keys(s.locked).forEach(function (b) { var bi = Number(b), sl = M.sOf[bi]; St.cnt[j][bi] = s.locked[b]; secIn[sl] += s.locked[b]; if (s.group) grpIn[sl][s.group] = (grpIn[sl][s.group] || 0) + s.locked[b]; }); return; }
+      if (s.locked) { Object.keys(s.locked).forEach(function (b) { var bi = Number(b), sl = M.sOf[bi]; St.cnt[j][bi] = s.locked[b]; secIn[sl] += s.locked[b]; s.groups.forEach(function (g) { grpIn[sl][g] = (grpIn[sl][g] || 0) + s.locked[b]; }); }); return; }
       for (var k = 0; k < s.sections; k++) {
         var best = -1, bc = Infinity;
         (M.bOf[s.credit] || []).forEach(function (b) {
           var c = 0, sl = M.sOf[b];
           if (!halfDemand[b][j]) c += HARD / 10;
           if (secIn[sl] >= M.R) c += HARD;
-          if (s.group && M.cap[s.group] && (grpIn[sl][s.group] || 0) >= M.cap[s.group]) c += HARD;
+          s.groups.forEach(function (g) { if (M.cap[g] && (grpIn[sl][g] || 0) >= M.cap[g]) c += HARD; });
           c += secIn[sl] * 3 + St.cnt[j][b] * 40;
           for (var o = 0; o < J; o++) if (o !== j && St.cnt[o][b] && M.subs[o].sections) c += co[j][o] * St.cnt[o][b] / M.subs[o].sections;
           c += rnd() * 2;
@@ -260,7 +261,7 @@ var BLOCK = (function () {
         });
         if (best < 0) continue;
         St.cnt[j][best]++; secIn[M.sOf[best]]++;
-        if (s.group) grpIn[M.sOf[best]][s.group] = (grpIn[M.sOf[best]][s.group] || 0) + 1;
+        s.groups.forEach(function (g) { grpIn[M.sOf[best]][g] = (grpIn[M.sOf[best]][g] || 0) + 1; });
       }
     });
   }
@@ -333,7 +334,7 @@ var BLOCK = (function () {
     var M = St.M;
     var overs = function () {
       var out = [], n = M.occR.slice(), g = M.occG.map(function (o) { return Object.assign({}, o); });
-      M.blocks.forEach(function (bb, b) { var sl = M.sOf[b]; M.subs.forEach(function (s, j) { var x = St.cnt[j][b]; if (!x) return; n[sl] += x; if (s.group && M.cap[s.group]) g[sl][s.group] = (g[sl][s.group] || 0) + x; }); });
+      M.blocks.forEach(function (bb, b) { var sl = M.sOf[b]; M.subs.forEach(function (s, j) { var x = St.cnt[j][b]; if (!x) return; n[sl] += x; s.groups.forEach(function (gg) { if (M.cap[gg]) g[sl][gg] = (g[sl][gg] || 0) + x; }); }); });
       M.slots.forEach(function (x, sl) { if (n[sl] > M.R) out.push({ sl: sl, g: null }); Object.keys(g[sl]).forEach(function (k) { if (M.cap[k] && g[sl][k] > M.cap[k]) out.push({ sl: sl, g: k }); }); });
       return out;
     };
@@ -347,7 +348,7 @@ var BLOCK = (function () {
         var cands = [];
         M.blocks.forEach(function (bb, b) {
           if (M.sOf[b] !== o.sl) return;
-          M.subs.forEach(function (s, j) { if (St.cnt[j][b] && !s.locked && (!o.g || s.group === o.g)) cands.push([j, b]); });
+          M.subs.forEach(function (s, j) { if (St.cnt[j][b] && !s.locked && (!o.g || s.groups.indexOf(o.g) >= 0)) cands.push([j, b]); });
         });
         for (var ci = 0; ci < cands.length && !improved; ci++) {
           var j = cands[ci][0], b1 = cands[ci][1];
@@ -356,7 +357,7 @@ var BLOCK = (function () {
             var b2 = targets[ti];
             // 옮기기, 또는 같은 학점 다른 정원과목 분반과 맞바꾸기
             var swaps = [-1];
-            M.subs.forEach(function (s, k) { if (k !== j && !s.locked && s.credit === M.subs[j].credit && St.cnt[k][b2] && s.group !== M.subs[j].group) swaps.push(k); });
+            M.subs.forEach(function (s, k) { if (k !== j && !s.locked && s.credit === M.subs[j].credit && St.cnt[k][b2] && !s.groups.some(function (g) { return M.subs[j].groups.indexOf(g) >= 0; })) swaps.push(k); });
             for (var si = 0; si < swaps.length && !improved; si++) {
               var k = swaps[si];
               St.cnt[j][b1]--; St.cnt[j][b2]++;
@@ -419,7 +420,7 @@ var BLOCK = (function () {
       Object.keys(need).forEach(function (js) {
         var j = Number(js), sb = M.subs[j];
         if (sb.locked) return;
-        var free = (M.bOf[sb.credit] || []).some(function (b) { return !St.cnt[j][b] && needAt[b] && used[b] < M.R && !(sb.group && M.cap[sb.group] && groupIn(St, b, sb.group) >= M.cap[sb.group]); });
+        var free = (M.bOf[sb.credit] || []).some(function (b) { return !St.cnt[j][b] && needAt[b] && used[b] < M.R && !sb.groups.some(function (g) { return M.cap[g] && groupIn(St, b, g) >= M.cap[g]; }); });
         if (!free) return;
         var sc = need[js] * 10 + (sb.count >= (sb.sections + 1) * sb.min ? 5 : 0) - sb.sections;
         if (sc > score) { score = sc; pick = j; }
@@ -453,7 +454,7 @@ var BLOCK = (function () {
   // 그 블록과 같은 시간에 열리는 정원과목 g 분반 수(공통과목 학급 포함)
   function groupIn(St, b, g) {
     var M = St.M, sl = M.sOf[b], n = M.occG[sl][g] || 0;
-    M.blocks.forEach(function (bb, b2) { if (M.sOf[b2] === sl) M.subs.forEach(function (s, j) { if (s.group === g) n += St.cnt[j][b2]; }); });
+    M.blocks.forEach(function (bb, b2) { if (M.sOf[b2] === sl) M.subs.forEach(function (s, j) { if (s.groups.indexOf(g) >= 0) n += St.cnt[j][b2]; }); });
     return n;
   }
 
@@ -485,7 +486,7 @@ var BLOCK = (function () {
         var base = Math.floor(list.length / x), extra = list.length % x, pos = 0;
         for (var i = 0; i < x; i++) {
           var size = base + (i < extra ? 1 : 0);
-          sections.push({ subject: sub.name, credit: sub.credit, group: sub.group, block: bl.id, no: i + 1, label: bl.id + (x > 1 ? String(i + 1) : ''),
+          sections.push({ subject: sub.name, credit: sub.credit, group: sub.group, groups: sub.groups.length > 1 ? sub.groups.slice() : undefined, partCredits: sub.partCredits || undefined, block: bl.id, no: i + 1, label: bl.id + (x > 1 ? String(i + 1) : ''),
             students: list.slice(pos, pos + size).map(function (z) { return z.id; }), min: sub.min, max: sub.max });
           pos += size;
         }
@@ -506,7 +507,7 @@ var BLOCK = (function () {
       var rooms = inB.length + M.occR[si];
       if (rooms > M.R) issues.push({ level: 'error', text: name + ' 분반이 ' + inB.length + '개' + (M.occR[si] ? '(공통과목 학급 ' + M.occR[si] + '개 별도)' : '') + '로 교실 ' + M.R + '개보다 많습니다.' });
       var g = Object.assign({}, M.occG[si]);
-      inB.forEach(function (s) { if (s.group && M.cap[s.group]) g[s.group] = (g[s.group] || 0) + 1; });
+      inB.forEach(function (s) { (s.groups || [s.group]).forEach(function (gg) { if (gg && M.cap[gg]) g[gg] = (g[gg] || 0) + 1; }); });
       Object.keys(g).forEach(function (k) { if (M.cap[k] && g[k] > M.cap[k]) issues.push({ level: 'error', short: { group: k, slot: sl, n: g[k], cap: M.cap[k] }, text: name + '에 ' + k + ' 수업이 ' + g[k] + '개로 ' + k + ' 교사 ' + M.cap[k] + '명보다 많습니다.' }); });
     });
     return { blocks: M.blocks.map(function (b) { return { id: b.id, credit: b.credit, slot: b.slot, half: b.half, pair: b.pair, logical: b.logical || b.id }; }),
@@ -547,22 +548,112 @@ var BLOCK = (function () {
     var slotOf = {}; (blocks || []).forEach(function (b) { slotOf[b.id] = b.slot || b.id; });
     var sk = function (s) { return slotOf[s.block] || s.block; };
     var busy = {}, load = {};
+    // 과목 묶음 분반: 첫 정원과목 교사 = teacherId, 둘째 = teacherId2 (partCredits가 있으면 그 시수로 부담 셈)
+    var part = function (s, k) { return s.partCredits ? Number(s.partCredits[k]) || 1 : (s.credit || 1); };
     sections.forEach(function (s) {
-      if (keep && s.teacherId) { (busy[sk(s)] = busy[sk(s)] || {})[s.teacherId] = 1; load[s.teacherId] = (load[s.teacherId] || 0) + (s.credit || 1); }
+      if (keep && s.teacherId) { (busy[sk(s)] = busy[sk(s)] || {})[s.teacherId] = 1; load[s.teacherId] = (load[s.teacherId] || 0) + part(s, 0); }
       else if (!keep) s.teacherId = '';
+      if (keep && s.teacherId2) { (busy[sk(s)] = busy[sk(s)] || {})[s.teacherId2] = 1; load[s.teacherId2] = (load[s.teacherId2] || 0) + part(s, 1); }
+      else if (!keep) s.teacherId2 = '';
     });
-    sections.filter(function (s) { return !s.teacherId; }).sort(function (a, b) { return a.subject < b.subject ? -1 : 1; }).forEach(function (s) {
-      var list = (teachersByGroup[s.group] || []).filter(function (t) { return !(busy[sk(s)] && busy[sk(s)][t.id]); });
-      if (!list.length) return;
+    var pickT = function (s, g, k) {
+      var list = (teachersByGroup[g] || []).filter(function (t) { return !(busy[sk(s)] && busy[sk(s)][t.id]); });
+      if (!list.length) return '';
       list.sort(function (a, b) { return (load[a.id] || 0) - (load[b.id] || 0); });
-      s.teacherId = list[0].id;
-      (busy[sk(s)] = busy[sk(s)] || {})[s.teacherId] = 1;
-      load[s.teacherId] = (load[s.teacherId] || 0) + (s.credit || 1);
+      var id = list[0].id;
+      (busy[sk(s)] = busy[sk(s)] || {})[id] = 1;
+      load[id] = (load[id] || 0) + part(s, k);
+      return id;
+    };
+    sections.filter(function (s) { return s.groups && s.groups.length > 1 && !s.teacherId2; }).forEach(function (s) { s.teacherId2 = pickT(s, s.groups[1], 1); });
+    sections.filter(function (s) { return !s.teacherId; }).sort(function (a, b) { return a.subject < b.subject ? -1 : 1; }).forEach(function (s) {
+      var id = pickT(s, s.group, 0);
+      if (!id) return;
+      s.teacherId = id;
     });
     return sections;
   }
 
-  /** 교차 묶음 추천: 지금 상태와 후보 묶음들을 짧게 풀어 보고, 오류가 가장 많이 줄어드는 순서로 */
+  /* ===== 과목 묶음: 학점이 작은 과목끼리 묶어(예: 스포츠 문화 1 + 미술 창작 2 = 3) 큰 학점 블록에 함께 놓기 =====
+   * subjects: [{name, credit, group, kind:'common'|'elective', curGroup, min, max, sections}]  (common = 학교 지정·공통, 모든 학생이 들음)
+   * bundles: [{parts:[과목 이름…]}]
+   * 학생이 묶음의 선택 과목을 모두 골랐으면 그 과목들 대신 묶음 하나를 고른 것으로 바꿈. 공통과목은 모든 학생이 묶음으로 들어야 함 */
+  function applyBundles(subjects, students, bundles) {
+    var byName = {}; subjects.forEach(function (s) { byName[s.name] = s; });
+    var info = [], issues = [];
+    (bundles || []).forEach(function (b) {
+      var parts = (b.parts || []).map(String).filter(function (n, i, a) { return n && a.indexOf(n) === i; });
+      var miss = parts.filter(function (n) { return !byName[n]; });
+      if (miss.length) { issues.push({ level: 'error', text: '과목 묶음 「' + parts.join('+') + '」: 이번 학기에 없는 과목 ' + miss.join(', ') }); return; }
+      if (parts.length < 2) { issues.push({ level: 'error', text: '과목 묶음에는 과목이 두 개 이상 필요합니다.' }); return; }
+      var ps = parts.map(function (n) { return byName[n]; });
+      var el = ps.filter(function (x) { return x.kind !== 'common'; });
+      if (!el.length) { issues.push({ level: 'error', text: '과목 묶음 「' + parts.join('+') + '」: 선택 과목이 하나는 있어야 합니다(공통과목끼리는 학급별로 운영).' }); return; }
+      // 대표(교사·인원 기준) = 학점이 가장 큰 선택 과목
+      var main = el.slice().sort(function (a, c) { return c.credit - a.credit; })[0];
+      var order = [main].concat(ps.filter(function (x) { return x !== main; }));
+      var groups = [], pc = [];
+      order.forEach(function (x) { var g = x.group || ''; var k = groups.indexOf(g); if (k < 0) { groups.push(g); pc.push(x.credit); } else pc[k] += x.credit; });
+      info.push({ name: parts.join('+'), parts: parts, items: ps.map(function (x) { return { name: x.name, credit: x.credit, kind: x.kind || 'elective' }; }), electives: el.map(function (x) { return x.name; }), commons: ps.filter(function (x) { return x.kind === 'common'; }).map(function (x) { return x.name; }),
+        credit: ps.reduce(function (a, x) { return a + x.credit; }, 0), group: main.group || '', groups: groups.filter(Boolean), partCredits: pc, main: main, count: 0 });
+    });
+    var used = {}, cover = {};
+    info.forEach(function (b) { b.electives.forEach(function (n) { used[n] = 1; }); b.commons.forEach(function (n) { cover[n] = { covered: 0, missing: {} }; }); });
+    var out = students.map(function (st) {
+      var picks = st.picks.slice(), got = {};
+      info.forEach(function (b) {
+        if (!b.electives.every(function (n) { return picks.indexOf(n) >= 0; })) return;
+        if (b.commons.some(function (n) { return got[n]; })) return;
+        picks = picks.filter(function (n) { return b.electives.indexOf(n) < 0; }).concat([b.name]);
+        b.count++;
+        b.commons.forEach(function (n) { got[n] = 1; });
+      });
+      Object.keys(cover).forEach(function (n) {
+        if (got[n]) cover[n].covered++;
+        else {
+          // 이 공통과목과 묶인 선택 과목과 같은 학점의 과목 중 학생이 고른 것
+          var crs = {}; info.forEach(function (b) { if (b.commons.indexOf(n) >= 0) b.electives.forEach(function (e) { crs[byName[e].credit] = 1; }); });
+          var k = st.picks.filter(function (p) { return byName[p] && byName[p].kind !== 'common' && crs[byName[p].credit]; }).join('·') || '해당 학점 과목 없음';
+          cover[n].missing[k] = (cover[n].missing[k] || 0) + 1;
+        }
+      });
+      return Object.assign({}, st, { picks: picks, rawPicks: st.picks });
+    });
+    Object.keys(cover).forEach(function (n) {
+      var miss = students.length - cover[n].covered;
+      if (miss > 0) issues.push({ level: 'error', text: n + '(공통)을 묶음으로 듣지 못하는 학생 ' + miss + '명 — 고른 과목: ' + Object.keys(cover[n].missing).map(function (k) { return k + ' ' + cover[n].missing[k] + '명'; }).slice(0, 4).join(', ') + '. 이 과목들과의 묶음도 만들어 주세요.' });
+    });
+    info.forEach(function (b) { if (!b.count) issues.push({ level: 'warn', text: '과목 묶음 「' + b.name + '」을 고른 학생이 없습니다.' }); });
+    var subs = subjects.filter(function (x) { return x.kind !== 'common'; }).map(function (x) { return { name: x.name, credit: x.credit, group: x.group, min: x.min, max: x.max, sections: x.sections }; });
+    info.forEach(function (b) {
+      subs.push({ name: b.name, credit: b.credit, group: b.group, groups: b.groups, partCredits: b.partCredits, min: b.main.min, max: b.main.max, sections: b.main.sections, bundle: true });
+    });
+    return { subjects: subs, students: out, bundles: info.map(function (b) { var o = Object.assign({}, b); delete o.main; return o; }), issues: issues };
+  }
+  /** 과목 묶음 추천: 공통과목(k학점) + 한 과목군에서 하나씩 고르는 선택 과목(m학점) → k+m 학점 블록이 이미 있으면 */
+  function suggestBundles(subjects, students) {
+    var el = subjects.filter(function (x) { return x.kind !== 'common'; }), cm = subjects.filter(function (x) { return x.kind === 'common'; });
+    var credits = {}; el.forEach(function (x) { credits[x.credit] = 1; });
+    var N = students.length || 1, out = [];
+    // 학생마다 정확히 하나씩 고르는 선택 과목 묶음(같은 학점·같은 과목군)
+    var sets = {};
+    el.forEach(function (x) { var k = x.credit + '|' + (x.curGroup || x.group || ''); (sets[k] = sets[k] || []).push(x); });
+    Object.keys(sets).forEach(function (k) {
+      var set = sets[k], names = set.map(function (x) { return x.name; });
+      var exactly = students.filter(function (st) { return st.picks.filter(function (p) { return names.indexOf(p) >= 0; }).length === 1; }).length;
+      if (exactly / N < 0.9) return;
+      cm.forEach(function (c) {
+        var T = c.credit + set[0].credit;
+        if (!credits[T] || T === set[0].credit) return;
+        out.push({ common: c.name, credit: T, from: set[0].credit, parts: names, coverage: exactly / N,
+          bundles: names.map(function (n) { return { parts: [c.name, n] }; }),
+          text: c.name + '(' + c.credit + ') + ' + names.join('/') + '(' + set[0].credit + ') → ' + T + '학점 블록' });
+      });
+    });
+    return out.sort(function (a, b) { return b.coverage - a.coverage; });
+  }
+
+  /** 교차 편성 추천: 지금 상태와 후보들을 짧게 풀어 보고, 오류가 가장 많이 줄어드는 순서로 */
   function recommend(input, opts) {
     opts = opts || {};
     var t0 = Date.now(), budget = opts.timeLimit || 30000;
@@ -599,7 +690,7 @@ var BLOCK = (function () {
     Object.keys(shortCr).forEach(function (cr) {
       cr = Number(cr);
       (input.commons || []).forEach(function (c) {
-        if (Number(c.credit) !== cr || freeOf(cr) < 1) return;
+        if (Number(c.credit) < cr || freeOf(cr) < 1) return;
         variants.forEach(function (v, vi) {
           var half = Math.max(v.halves[0].length, v.halves[1].length);
           var pre = (shortG[c.group] ? 50 : 0) + (cap[c.group] && cap[c.group] < half ? 30 : 0) + vi * 5;
@@ -625,6 +716,6 @@ var BLOCK = (function () {
     return { base: B, options: options, shortGroups: Object.keys(shortG), ms: Date.now() - t0 };
   }
 
-  return { solve: solve, recommend: recommend, assignOnly: assignOnly, assignRooms: assignRooms, assignTeachers: assignTeachers, prepare: prepare, LETTERS: LETTERS };
+  return { solve: solve, recommend: recommend, applyBundles: applyBundles, suggestBundles: suggestBundles, assignOnly: assignOnly, assignRooms: assignRooms, assignTeachers: assignTeachers, prepare: prepare, LETTERS: LETTERS };
 })();
 if (typeof module !== 'undefined') module.exports = BLOCK;

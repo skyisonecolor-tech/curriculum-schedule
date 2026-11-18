@@ -76,14 +76,15 @@
     if (!ui.bkRound || !rounds.some((r) => r.id === ui.bkRound)) ui.bkRound = rounds[0].id;
     const rd = rounds.find((r) => r.id === ui.bkRound);
     if (!ui.bkSem || !rd.sems.includes(ui.bkSem)) ui.bkSem = rd.sems[0];
-    const year = ui.bkYear || String((Number(ui.year) || new Date().getFullYear()) + 1);
+    // 편성 학년도 = 입학년도 + 학년 - 1 (예: 2025 입학생의 3학년 1학기 → 2027학년도)
+    const year = String(Number(rd.year) + Number(String(ui.bkSem)[0]) - 1);
     v.innerHTML = '<div class="card tight"><div class="row"><h2>블록 편성</h2>'
       + '<select id="bkr" class="input sm" aria-label="신청 회차">' + rounds.map((r) => '<option value="' + esc(r.id) + '"' + (r.id === ui.bkRound ? ' selected' : '') + '>' + esc(r.name) + '</option>').join('') + '</select>'
-      + '<select id="bks" class="input sm" aria-label="학기">' + rd.sems.map((s) => '<option value="' + s + '"' + (s === ui.bkSem ? ' selected' : '') + '>' + semShort(s) + '</option>').join('') + '</select>'
-      + '<label class="row small">편성 학년도 <input id="bky" class="input sm w4" inputmode="numeric" value="' + esc(year) + '"></label>'
+      + '<select id="bks" class="input sm" aria-label="학기">' + rd.sems.map((s) => '<option value="' + s + '"' + (s === ui.bkSem ? ' selected' : '') + '>' + semShort(s) + (A.nowGrade(Number(rd.year) + Number(s[0]) - 1, s[0]) ? ' · ' + A.nowGrade(Number(rd.year) + Number(s[0]) - 1, s[0]) : '') + '</option>').join('') + '</select>'
+      + '<span class="pill" id="bky" title="입학년도와 학년으로 정해집니다">' + esc(year) + '학년도' + (A.yearTag(year) ? ' · ' + A.yearTag(year) : '') + '</span>'
       + '<span style="margin-left:auto"></span>' + (plans.length ? '<span class="muted small">저장된 편성: ' + plans.map((p) => esc(semShort(p.sem)) + (p.status === '확정' ? '(확정)' : '')).join(', ') + '</span>' : '') + '</div></div><div id="bkbody"></div>';
-    const reload = () => { ui.bkRound = v.querySelector('#bkr').value; const r2 = rounds.find((r) => r.id === ui.bkRound); if (!r2.sems.includes(v.querySelector('#bks').value)) ui.bkSem = r2.sems[0]; else ui.bkSem = v.querySelector('#bks').value; ui.bkYear = v.querySelector('#bky').value; BS = null; VIEWS.blocks(v); };
-    v.querySelector('#bkr').onchange = reload; v.querySelector('#bks').onchange = reload; v.querySelector('#bky').onchange = reload;
+    const reload = () => { ui.bkRound = v.querySelector('#bkr').value; const r2 = rounds.find((r) => r.id === ui.bkRound); if (!r2.sems.includes(v.querySelector('#bks').value)) ui.bkSem = r2.sems[0]; else ui.bkSem = v.querySelector('#bks').value; BS = null; VIEWS.blocks(v); };
+    v.querySelector('#bkr').onchange = reload; v.querySelector('#bks').onchange = reload;
     const body = v.querySelector('#bkbody');
     if (!BS || BS.roundId !== ui.bkRound || BS.sem !== ui.bkSem) {
       loading(body);
@@ -116,8 +117,12 @@
     st.classNos = Array.from(new Set(d.students.map((s) => Number(s.classNo)).filter((x) => x > 0))).sort((a, b) => a - b);
     if (!st.classNos.length) st.classNos = Array.from({ length: d.classes.count || 0 }, (_, i) => i + 1);
     st.pairs = (set.pairs || []).map((p) => Object.assign({}, p));
+    st.bundles = (set.bundles || []).map((b) => ({ parts: (b.parts || []).slice() }));
+    st.curGroupOf = {}; d.subjects.forEach((o) => { st.curGroupOf[o.과목] = o.그룹 || ''; });
     if (d.plan && d.plan.sections.length) {
-      st.result = { blocks: set.blocks || deriveBlocks(d.plan.sections), pairs: set.pairSlots || [], sections: d.plan.sections.map((x) => Object.assign({}, x)), issues: set.lastIssues || [] };
+      const binfo = set.bundleInfo || [];
+      st.result = { blocks: set.blocks || deriveBlocks(d.plan.sections), pairs: set.pairSlots || [], bundles: binfo, issues: set.lastIssues || [],
+        sections: d.plan.sections.map((x) => { const o = Object.assign({}, x); const b = binfo.find((y) => y.name === x.subject); if (b && b.groups.length > 1) { o.groups = b.groups.slice(); o.partCredits = b.partCredits; } return o; }) };
     }
     if (set.neis) st.neis = set.neis;
     return st;
@@ -128,11 +133,26 @@
   }
   function included() { return BS.d.students.filter((s) => s.picks.length && BS.include.includes(s.selStatus)); }
   function counts() { const c = {}; included().forEach((s) => s.picks.forEach((p) => { c[p] = (c[p] || 0) + 1; })); return c; }
+  /* ---------- 과목 묶음 ---------- */
+  function subjectMeta() {
+    return BS.subjects.map((s) => ({ name: s.name, credit: Number(s.credit), group: s.group, kind: 'elective', curGroup: BS.curGroupOf[s.name] || '', min: Number(s.min) || 0, max: Number(s.max) || 35, sections: Number(s.sections) || 0 }))
+      .concat(BS.commons.map((c) => ({ name: c.name, credit: Number(c.credit), group: c.group, kind: 'common', curGroup: '' })));
+  }
+  let bundleMemo = null;
+  function bundled() {
+    const stu = included().map((s) => ({ id: s.id, cls: s.classNo, no: s.number, picks: s.picks }));
+    const key = JSON.stringify([BS.bundles, BS.subjects.map((x) => [x.name, x.group, x.min, x.max, x.sections]), BS.include, stu.length]);
+    const full = BS.bundles.map((b) => ({ parts: b.parts.filter(Boolean) })).filter((b) => b.parts.length >= 2);
+    if (!bundleMemo || bundleMemo.key !== key) bundleMemo = { key, r: BK.applyBundles(subjectMeta(), stu, full) };
+    return bundleMemo.r;
+  }
+  function partsOf(subject) { const b = ((BS.result && BS.result.bundles) || bundled().bundles).find((x) => x.name === subject); return b ? b.parts : [subject]; }
   function engineInput() {
     const caps = {}; Object.keys(BS.caps).forEach((g) => { if (Number(BS.caps[g]) > 0) caps[g] = Number(BS.caps[g]); });
+    const bd = bundled();
     return {
-      subjects: BS.subjects.map((s) => ({ name: s.name, credit: s.credit, group: s.group, min: Number(s.min) || 0, max: Number(s.max) || 35, sections: Number(s.sections) || 0 })),
-      students: included().map((s) => ({ id: s.id, cls: s.classNo, no: s.number, picks: s.picks })),
+      subjects: bd.subjects,
+      students: bd.students.map((s) => ({ id: s.id, cls: s.cls, no: s.no, picks: s.picks })),
       roomCount: BS.rooms.length, rooms: BS.rooms, teacherCap: caps,
       blocks: BS.result ? BS.result.blocks : null,
       pairs: BS.pairs.map(pairSpec).filter(Boolean),
@@ -206,7 +226,8 @@
       inB.forEach((s) => {
         if (s.room) { if (rm[s.room]) out.push({ level: 'error', text: name + '에서 ' + s.room + ' 교실을 ' + (rm[s.room] === '공통' ? '공통과목 학급과 함께' : '두 분반이') + ' 씁니다.' }); rm[s.room] = 1; }
         if (s.teacherId) { if (tc[s.teacherId]) out.push({ level: 'error', text: name + '에서 ' + teacherName(s.teacherId) + ' 선생님이 두 분반을 맡습니다.' }); tc[s.teacherId] = 1; }
-        if (s.group) gc[s.group] = (gc[s.group] || 0) + 1;
+        (s.groups || [s.group]).forEach((g) => { if (g) gc[g] = (gc[g] || 0) + 1; });
+        if (s.teacherId2) { if (tc[s.teacherId2]) out.push({ level: 'error', text: name + '에서 ' + teacherName(s.teacherId2) + ' 선생님이 두 분반을 맡습니다.' }); tc[s.teacherId2] = 1; }
       });
       Object.keys(gc).forEach((g) => { const cap = Number(BS.caps[g]); if (cap > 0 && gc[g] > cap) out.push({ level: 'error', text: name + ' ' + g + ' 수업 ' + gc[g] + '개 > 교사 ' + cap + '명' }); });
     });
@@ -222,11 +243,12 @@
     let missing = 0, clash = 0;
     included().forEach((st) => {
       const w = where[st.id] || [];
-      if (st.picks.some((p) => !w.some((x) => x.subject === p))) missing++;
+      if (st.picks.some((p) => !w.some((x) => partsOf(x.subject).includes(p)))) missing++;
       if (new Set(w.map((x) => slotOf(x.block))).size !== w.length) clash++;
     });
     if (missing) out.push({ level: 'error', text: '과목이 배정되지 않은 학생 ' + missing + '명 (학생별 확인 탭)' });
     if (clash) out.push({ level: 'error', text: '한 블록에 두 과목이 겹친 학생 ' + clash + '명' });
+    if (BS.bundles.length) bundled().issues.forEach((x) => out.push(x));
     return out;
   }
 
@@ -235,12 +257,12 @@
     const inc = included().length, total = BS.d.students.length;
     const st = BS.status ? '<span class="pill ' + (BS.status === '확정' ? 'ok' : 'warn') + '">' + esc(BS.status) + '</span>' : '<span class="pill">저장 전</span>';
     body.innerHTML = '<div class="row"><div class="seg3" role="tablist">' + tabs.map((t) => '<button type="button" data-bt="' + t[0] + '" class="' + (BS.tab === t[0] ? 'on' : '') + '">' + t[1] + '</button>').join('') + '</div>'
-      + '<span class="muted">' + esc(BS.year) + '학년도 ' + esc(semShort(BS.sem)) + ' · 대상 ' + inc + '명 / ' + total + '명</span>' + st + (BS.dirty ? '<span class="pill warn">저장 안 됨</span>' : '')
+      + '<span class="muted">' + esc(BS.year) + '학년도' + (A.yearTag(BS.year) ? '(' + A.yearTag(BS.year) + ')' : '') + ' ' + esc(semShort(BS.sem)) + (A.nowGrade(BS.year, BS.sem[0]) ? ' · ' + esc(A.nowGrade(BS.year, BS.sem[0])) : '') + ' · 대상 ' + inc + '명 / ' + total + '명</span>' + st + (BS.dirty ? '<span class="pill warn">저장 안 됨</span>' : '')
       + '<span style="margin-left:auto"></span>' + (BS.result ? '<button class="btn sm" id="bsave">저장</button><button class="btn sm pri" id="bfix">' + (BS.status === '확정' ? '확정 유지 저장' : '확정') + '</button>' : '') + '</div><div id="btab"></div>';
     body.querySelectorAll('[data-bt]').forEach((b) => { b.onclick = () => { BS.tab = b.dataset.bt; draw(body); }; });
     const save = (status, btn) => run(btn, async () => {
       const set = { include: BS.include, rooms: BS.rooms, caps: BS.caps, blocks: BS.result.blocks, neis: BS.neis, lastIssues: (BS.result.issues || []).slice(0, 30),
-        pairs: BS.pairs, pairSlots: BS.result.pairs || [],
+        pairs: BS.pairs, pairSlots: BS.result.pairs || [], bundles: BS.bundles, bundleInfo: BS.result.bundles || [],
         subjects: Object.fromEntries(BS.subjects.map((s) => [s.name, { group: s.group, min: s.min, max: s.max, sections: s.sections }])) };
       const r = await api('blockSave', { roundId: BS.roundId, sem: BS.sem, year: BS.year, name: BS.d.round.name + ' ' + semShort(BS.sem), settings: set, sections: BS.result.sections, status });
       BS.status = r.status; BS.dirty = false; toast(status === '확정' ? '확정해 저장했습니다.' : '저장했습니다.'); draw(body);
@@ -261,10 +283,12 @@
     const groups = Array.from(new Set(BS.subjects.map((s) => s.group).filter(Boolean)));
     groups.forEach((g) => { if (!(g in BS.caps)) BS.caps[g] = BS.tcount[g] || ''; });
     const byCredit = {};
-    included().forEach((s) => { const m = {}; s.picks.forEach((p) => { const o = BS.subjects.find((x) => x.name === p); if (o) m[o.credit] = (m[o.credit] || 0) + 1; }); Object.keys(m).forEach((k) => { byCredit[k] = Math.max(byCredit[k] || 0, m[k]); }); });
+    const bdx = bundled(), crOf = {}; bdx.subjects.forEach((x) => { crOf[x.name] = x.credit; });
+    bdx.students.forEach((s) => { const m = {}; s.picks.forEach((p) => { if (crOf[p]) m[crOf[p]] = (m[crOf[p]] || 0) + 1; }); Object.keys(m).forEach((k) => { byCredit[k] = Math.max(byCredit[k] || 0, m[k]); }); });
     const autoSec = (s) => Math.max(c[s.name] ? 1 : 0, Math.ceil((c[s.name] || 0) / (Number(s.max) || 35)));
     const totalSec = {};
-    BS.subjects.forEach((s) => { totalSec[s.credit] = (totalSec[s.credit] || 0) + (Number(s.sections) || autoSec(s)); });
+    const bcount = {}; bdx.students.forEach((s) => s.picks.forEach((p) => { bcount[p] = (bcount[p] || 0) + 1; }));
+    bdx.subjects.forEach((s) => { totalSec[s.credit] = (totalSec[s.credit] || 0) + (Number(s.sections) || Math.max(bcount[s.name] ? 1 : 0, Math.ceil((bcount[s.name] || 0) / (Number(s.max) || 35)))); });
     const stCount = {}; BS.d.students.forEach((s) => { const k = s.picks.length ? s.selStatus : '선택 없음'; stCount[k] = (stCount[k] || 0) + 1; });
     t.innerHTML = '<div class="grid-blk">'
       + '<div class="card tight"><h3>대상 학생</h3><div class="row">' + STATUS_INCLUDE.map((k) => '<label class="ck"><input type="checkbox" data-inc="' + k + '"' + (BS.include.includes(k) ? ' checked' : '') + '> ' + (k === '확인필요' ? '확인 필요' : k === '임시' ? '임시 저장' : '제출 완료') + ' ' + (stCount[k] || 0) + '명</label>').join('')
@@ -276,7 +300,7 @@
       + '<h3>동시에 수업할 수 있는 교사 수 (정원과목별)</h3><table class="mini edit"><thead><tr><th>정원과목</th><th>교사 계정</th><th>동시 가능</th></tr></thead><tbody>'
       + groups.map((g) => '<tr><td>' + esc(g) + '</td><td class="num">' + (BS.tcount[g] || 0) + '</td><td><input class="input sm w4" data-cap="' + esc(g) + '" inputmode="numeric" value="' + esc(BS.caps[g]) + '" placeholder="제한 없음"></td></tr>').join('')
       + '</tbody></table><p class="hint">한 블록 안에서 같은 정원과목 분반이 이 수를 넘지 않게 합니다. 비우면 제한하지 않습니다. 교사 계정의 「교과」를 정원과목 이름으로 넣어 두면 자동으로 셉니다.</p>'
-      + pairCard(byCredit) + '</div>'
+      + bundleCard(byCredit) + pairCard(byCredit) + '</div>'
       + '<div class="card tight"><div class="row"><h3>과목별 분반 기준</h3><span style="margin-left:auto"></span><label class="row small">모두 최소 <input id="ballmin" class="input sm w4" value="10"></label><label class="row small">최대 <input id="ballmax" class="input sm w4" value="35"></label><button class="btn sm" id="ball">적용</button></div>'
       + '<div class="tbl-wrap"><table class="tbl edit"><thead><tr><th>과목</th><th>학점</th><th>신청</th><th>정원과목</th><th>최소</th><th>최대</th><th>분반 수</th></tr></thead><tbody>'
       + BS.subjects.map((s, i) => '<tr' + (c[s.name] ? '' : ' class="dim"') + '><td>' + esc(s.name) + '</td><td class="num">' + s.credit + '</td><td class="num"><b>' + (c[s.name] || 0) + '</b></td>'
@@ -292,6 +316,7 @@
     t.querySelectorAll('[data-cap]').forEach((el) => { el.onchange = () => { BS.caps[el.dataset.cap] = el.value.trim(); BS.dirty = true; }; });
     t.querySelectorAll('[data-sj]').forEach((el) => { el.onchange = () => { BS.subjects[Number(el.dataset.sj)][el.dataset.k] = el.value.trim(); BS.dirty = true; if (el.dataset.k !== 'group') later(() => drawSet(t, body)); }; });
     t.querySelector('#ball').onclick = () => { const mn = t.querySelector('#ballmin').value, mx = t.querySelector('#ballmax').value; BS.subjects.forEach((s) => { s.min = mn; s.max = mx; }); BS.dirty = true; drawSet(t, body); };
+    bindBundleCard(t, body);
     bindPairCard(t, body, byCredit);
     const sv = t.querySelector('#bsolve');
     sv.onclick = () => {
@@ -303,6 +328,7 @@
         prog.textContent = '계산 중…';
         const inp = engineInput(); inp.blocks = null;
         const r = await runWorker({ mode: 'solve', input: inp, opts: { iters: 4000, timeLimit: 25000 } }, (p) => { prog.textContent = (p.stage ? p.stage + ' · ' : '') + Math.round(100 * p.it / p.iters) + '%'; });
+        r.bundles = bundled().bundles;
         BS.result = r;
         BK.assignRooms(r.sections, BS.rooms, false, r.blocks, slotBusy().rooms);
         BS.dirty = true; BS.tab = 'grid';
@@ -312,32 +338,78 @@
     };
   }
 
+  function bundleCard(byCredit) {
+    const meta = subjectMeta();
+    const bd = bundled();
+    const opt = (sel) => '<option value="">고르기</option>' + meta.slice().sort((a, b) => (a.kind === b.kind ? a.credit - b.credit : a.kind === 'common' ? -1 : 1)).map((m) => '<option value="' + esc(m.name) + '"' + (m.name === sel ? ' selected' : '') + '>' + esc(m.name) + ' · ' + m.credit + '학점' + (m.kind === 'common' ? ' (공통)' : '') + '</option>').join('');
+    return '<h3 id="bndh">과목 묶음 <span class="muted small">(작은 학점 과목을 묶어 큰 학점 블록에)</span></h3>'
+      + '<p class="hint">예: <b>스포츠 문화(공통 1) + 미술 창작(2) = 3학점</b>으로 묶어 3학점 블록에 함께 놓습니다. 같은 학생들이 한 분반으로 3시간(체육 1 + 미술 2)을 듣고, 교사는 두 교과가 함께 맡습니다. '
+      + '공통과목을 묶으면 모든 학생이 어느 묶음으로든 들어야 하므로, 같은 과목군의 다른 과목(예: 음악연주와 창작)과의 묶음도 함께 만드세요. 선택 과목끼리도 묶을 수 있습니다(둘 다 고른 학생만 묶음으로 듣고, 나머지는 따로).</p>'
+      + (BS.bundles.length ? '<table class="mini edit"><thead><tr><th>과목 1</th><th>과목 2</th><th>과목 3</th><th>합계</th><th>학생</th><th></th></tr></thead><tbody>'
+        + BS.bundles.map((b, i) => {
+          const inf = bd.bundles.find((x) => x.parts.join('+') === b.parts.filter(Boolean).join('+'));
+          const cr = b.parts.reduce((a, n) => a + ((meta.find((m) => m.name === n) || {}).credit || 0), 0);
+          return '<tr>' + [0, 1, 2].map((k) => '<td><select class="input sm" data-bk="' + k + '" data-bi="' + i + '">' + opt(b.parts[k]) + '</select></td>').join('')
+            + '<td class="num"><b>' + cr + '</b>학점' + (byCredit[cr] ? '' : ' <span class="no small">이 학점 블록 없음 → 새로 생김</span>') + '</td><td class="num">' + (inf ? inf.count + '명' : '-') + '</td>'
+            + '<td><button class="btn sm dan" data-bdel="' + i + '">빼기</button></td></tr>';
+        }).join('') + '</tbody></table>' : '')
+      + (BS.bundles.length && bd.issues.length ? '<ul class="msgs">' + bd.issues.map((x) => '<li class="' + x.level + '">' + esc(x.text) + '</li>').join('') + '</ul>' : '')
+      + '<div class="row"><button class="btn sm" id="badd">묶음 추가</button><button class="btn sm pri" id="brec">묶음 추천</button></div>';
+  }
+  function bindBundleCard(t, body) {
+    const redraw = () => setTimeout(() => drawSet(t, body), 0);
+    t.querySelector('#badd').onclick = () => { BS.bundles.push({ parts: ['', ''] }); BS.dirty = true; redraw(); };
+    t.querySelectorAll('[data-bk]').forEach((el) => {
+      el.onchange = () => { const b = BS.bundles[Number(el.dataset.bi)]; b.parts[Number(el.dataset.bk)] = el.value; b.parts = b.parts.slice(0, 3); while (b.parts.length < 2) b.parts.push(''); BS.dirty = true; redraw(); };
+    });
+    t.querySelectorAll('[data-bdel]').forEach((b) => { b.onclick = () => { BS.bundles.splice(Number(b.dataset.bdel), 1); BS.dirty = true; redraw(); }; });
+    t.querySelector('#brec').onclick = () => {
+      const stu = included().map((s) => ({ id: s.id, picks: s.picks }));
+      const sug = BK.suggestBundles(subjectMeta(), stu);
+      modal('<h2>과목 묶음 추천</h2>'
+        + (sug.length ? '<p class="muted">공통과목과, 학생마다 하나씩 고르는 같은 학점 선택 과목들을 묶으면 이미 있는 큰 학점 블록에 들어갑니다.</p><div class="tbl-wrap"><table class="tbl"><thead><tr><th>묶음</th><th>대상</th><th></th></tr></thead><tbody>'
+          + sug.map((x, i) => '<tr><td>' + esc(x.text) + '<br><span class="muted small">' + x.bundles.map((b) => esc(b.parts.join('+'))).join(' · ') + '</span></td><td>' + Math.round(x.coverage * 100) + '% 학생</td><td><button class="btn sm pri" data-buse="' + i + '">이 묶음 쓰기</button></td></tr>').join('') + '</tbody></table></div>'
+          : '<div class="empty">추천할 묶음이 없습니다. (공통과목 학점 + 선택 과목 학점이 이미 있는 블록 학점과 맞는 경우를 찾습니다.) 직접 [묶음 추가]로 만들 수 있습니다.</div>')
+        + '<div class="row" style="justify-content:flex-end"><button class="btn" data-close>닫기</button></div>', (bg, close) => {
+        bg.querySelectorAll('[data-buse]').forEach((b) => {
+          b.onclick = () => {
+            const x = sug[Number(b.dataset.buse)];
+            x.bundles.forEach((nb) => { if (!BS.bundles.some((o) => o.parts.join('+') === nb.parts.join('+'))) BS.bundles.push({ parts: nb.parts.slice() }); });
+            BS.dirty = true; close(); drawSet(t, body); toast('묶음을 넣었습니다. [다시 자동 편성]을 눌러 주세요.');
+          };
+        });
+      }, { wide: true });
+    };
+  }
   function pairCard(byCredit) {
     const credits = Object.keys(byCredit).map(Number).sort((a, b) => b - a);
     const half = (p) => pairHalves(p);
-    return '<h3 id="pairh">교차 묶음 <span class="muted small">(교사가 모자랄 때)</span></h3>'
+    return '<h3 id="pairh">교차 편성 <span class="muted small">(교사가 모자랄 때 · 두 무리가 시간을 엇갈려)</span></h3>'
       + '<p class="hint">학급을 두 무리로 나누고 두 시간(①·②)을 엇갈려 씁니다. <b>공통+선택</b>: ① 앞무리는 공통과목(학급별), 뒷무리는 선택 블록 → ② 서로 바꿈. 공통과목 시간까지 선택 분반을 열 수 있어 한 시간에 필요한 교사가 줄어듭니다. '
-      + '<b>선택+선택</b>: 선택 블록 두 개를 무리별로 엇갈려, 한 과목 분반을 두 시간에 나눠 엽니다(시간이 늘지는 않음).</p>'
+      + '<b>선택+선택</b>: 선택 블록 두 개를 무리별로 엇갈려, 한 과목 분반을 두 시간에 나눠 엽니다(시간이 늘지는 않음).<br>'
+      + '두 쪽은 <b>주당 시간이 같아야</b> 서로 바꿀 수 있습니다(공통과목 학점이 더 크면 블록 학점만큼만 엇갈리고 나머지는 학급별). '
+      + '1학점+2학점처럼 <b>학점을 합쳐 큰 블록에 넣으려면 위의 [과목 묶음]</b>을 쓰세요.</p>'
       + (BS.pairs.length ? '<table class="mini edit"><thead><tr><th>종류</th><th>학점</th><th>공통과목</th><th>앞무리 반</th><th>뒷무리 반</th><th></th></tr></thead><tbody>'
         + BS.pairs.map((p, i) => {
           const hs = half(p);
-          const cms = BS.commons.filter((c) => c.credit === Number(p.credit));
+          const cms = BS.commons.slice().sort((a, b) => (b.credit >= Number(p.credit)) - (a.credit >= Number(p.credit)) || b.credit - a.credit);
+          const okC = (c) => c.credit >= Number(p.credit);
           return '<tr><td><select class="input sm" data-pk="type" data-pi="' + i + '"><option value="common"' + (p.type === 'common' ? ' selected' : '') + '>공통+선택</option><option value="elective"' + (p.type === 'elective' ? ' selected' : '') + '>선택+선택</option></select></td>'
             + '<td><select class="input sm" data-pk="credit" data-pi="' + i + '">' + credits.map((c) => '<option' + (Number(p.credit) === c ? ' selected' : '') + '>' + c + '</option>').join('') + '</select></td>'
-            + '<td>' + (p.type === 'common' ? '<select class="input sm" data-pk="common" data-pi="' + i + '"><option value="">고르기</option>' + cms.map((c) => '<option value="' + esc(c.name) + '"' + (c.name === p.common ? ' selected' : '') + '>' + esc(c.name) + (c.group ? ' (' + esc(c.group) + ')' : '') + '</option>').join('') + '</select>' + (cms.length ? '' : '<span class="no small"> 이 학점 공통과목 없음</span>') : '<span class="muted">-</span>') + '</td>'
+            + '<td>' + (p.type === 'common' ? '<select class="input sm" data-pk="common" data-pi="' + i + '"><option value="">고르기</option>' + cms.map((c) => '<option value="' + esc(c.name) + '"' + (c.name === p.common ? ' selected' : '') + (okC(c) ? '' : ' disabled') + '>' + esc(c.name) + ' ' + c.credit + '학점' + (c.group ? ' (' + esc(c.group) + ')' : '') + (okC(c) ? (c.credit > Number(p.credit) ? ' — ' + p.credit + '시간만 묶음' : '') : ' — 학점이 작아 묶을 수 없음') + '</option>').join('') + '</select>' + (cms.some(okC) ? '' : '<span class="no small"> ' + p.credit + '학점 이상 공통과목 없음</span>') : '<span class="muted">-</span>') + '</td>'
             + '<td><input class="input sm w8" data-pk="h1" data-pi="' + i + '" value="' + esc(p.h1) + '" placeholder="예: 1-5"></td>'
             + '<td class="small">' + (hs[1].length ? esc(classText(hs[1])) : '<span class="no">반을 나눠 주세요</span>') + '</td>'
             + '<td><button class="btn sm dan" data-pdel="' + i + '">빼기</button></td></tr>';
         }).join('') + '</tbody></table>' : '')
-      + '<div class="row"><button class="btn sm" id="padd">묶음 추가</button><button class="btn sm pri" id="prec">추천 받기</button><span class="muted small" id="pprog"></span></div>'
-      + (BS.pairs.length ? '<p class="hint">묶음을 바꾼 뒤에는 [다시 자동 편성]을 눌러 주세요. 시간표를 만들 때 묶음 시간은 한 덩어리(①·②)로 들어가고, 공통과목은 그 시간에 학급별로 표시됩니다.</p>' : '');
+      + '<div class="row"><button class="btn sm" id="padd">교차 추가</button><button class="btn sm pri" id="prec">교차 추천</button><span class="muted small" id="pprog"></span></div>'
+      + (BS.pairs.length ? '<p class="hint">교차 편성을 바꾼 뒤에는 [다시 자동 편성]을 눌러 주세요. 시간표를 만들 때 묶음 시간은 한 덩어리(①·②)로 들어가고, 공통과목은 그 시간에 학급별로 표시됩니다.</p>' : '');
   }
   function bindPairCard(t, body, byCredit) {
     const credits = Object.keys(byCredit).map(Number).sort((a, b) => b - a);
     const redraw = () => setTimeout(() => drawSet(t, body), 0);
     const def = () => { const h = BS.classNos; return classText(h.slice(0, Math.ceil(h.length / 2))); };
     t.querySelector('#padd').onclick = () => {
-      const cr = credits[0] || 3, cm = BS.commons.find((c) => c.credit === cr);
+      const cr = credits[0] || 3, cm = BS.commons.find((c) => c.credit >= cr);
       BS.pairs.push({ type: cm ? 'common' : 'elective', credit: cr, common: cm ? cm.name : '', h1: def() }); BS.dirty = true; redraw();
     };
     t.querySelectorAll('[data-pk]').forEach((el) => {
@@ -345,7 +417,7 @@
         const p = BS.pairs[Number(el.dataset.pi)];
         p[el.dataset.pk] = el.dataset.pk === 'credit' ? Number(el.value) : el.value;
         if (el.dataset.pk === 'h1') p.h1 = classText(parseClasses(el.value));
-        if (el.dataset.pk !== 'h1' && el.dataset.pk !== 'common') { const cm = BS.commons.find((c) => c.credit === Number(p.credit)); if (p.type === 'common' && !BS.commons.some((c) => c.name === p.common && c.credit === Number(p.credit))) p.common = cm ? cm.name : ''; }
+        if (el.dataset.pk !== 'h1' && el.dataset.pk !== 'common') { const cm = BS.commons.find((c) => c.credit >= Number(p.credit)); if (p.type === 'common' && !BS.commons.some((c) => c.name === p.common && c.credit >= Number(p.credit))) p.common = cm ? cm.name : ''; }
         BS.dirty = true; redraw();
       };
     });
@@ -367,14 +439,14 @@
     const desc = (p) => (p.type === 'common' ? '공통+선택 · ' + esc(p.common.name) + (p.common.group ? ' (' + esc(p.common.group) + ')' : '') : '선택+선택') + ' · ' + p.credit + '학점';
     const res = (x) => (x.ok ? '<span class="pill ok">오류 없음</span>' : '<span class="pill err">오류 ' + x.errors + '</span>') + (x.unassigned ? ' <span class="pill warn">미배정 ' + x.unassigned + '명</span>' : '') + (x.over ? ' <span class="muted small">교사 초과 ' + x.over + '</span>' : '');
     const good = r.options.filter((o) => o.better);
-    modal('<h2>교차 묶음 추천</h2>'
+    modal('<h2>교차 편성 추천</h2>'
       + '<p><b>지금</b> ' + res(B) + (r.shortGroups.length ? ' <span class="muted small">부족: ' + esc(r.shortGroups.join(', ')) + '</span>' : '') + '</p>'
       + (B.ok ? '<div class="note ok">지금 설정으로도 교사·교실 문제가 없습니다. 묶음이 꼭 필요하지 않습니다.</div>' : '')
       + (B.texts.length ? '<ul class="msgs">' + B.texts.map((x) => '<li class="error">' + esc(x) + '</li>').join('') + '</ul>' : '')
       + (r.options.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>묶음</th><th>앞무리 / 뒷무리</th><th>시험 편성 결과</th><th></th></tr></thead><tbody>'
         + r.options.map((o, i) => '<tr' + (i === 0 && o.better ? ' class="best"' : '') + '><td>' + (i === 0 && o.better ? '<span class="pill pri">추천</span> ' : '') + desc(o.pair) + '<br><span class="muted small">' + esc(o.slots.join(' · ')) + '</span></td>'
           + '<td class="small">' + esc(classText(o.pair.halves[0])) + '반 / ' + esc(classText(o.pair.halves[1])) + '반 (' + esc(o.pair.split) + ')</td>'
-          + '<td>' + res(o.result) + '</td><td><button class="btn sm' + (o.better ? ' pri' : '') + '" data-ruse="' + i + '">이 묶음 쓰기</button></td></tr>').join('') + '</tbody></table></div>'
+          + '<td>' + res(o.result) + '</td><td><button class="btn sm' + (o.better ? ' pri' : '') + '" data-ruse="' + i + '">이대로 쓰기</button></td></tr>').join('') + '</tbody></table></div>'
         : '<div class="empty">시험해 볼 묶음 후보가 없습니다. 같은 학점의 공통과목이 이번 학기에 있는지 확인해 주세요.</div>')
       + (r.options.length && !good.length && !B.ok ? '<div class="note warn">어떤 묶음도 오류를 줄이지 못했습니다. 교사 수(동시 가능)·최대 인원·교실을 먼저 조정해 보세요.</div>' : '')
       + '<p class="hint">각 후보를 짧게 시험 편성한 결과입니다(실제 편성은 [다시 자동 편성]에서 더 오래 계산합니다). 공통과목 교사는 무리 학급 수만큼 같은 시간에 필요합니다.</p>'
@@ -384,7 +456,7 @@
           const o = r.options[Number(b.dataset.ruse)];
           BS.pairs.push({ type: o.pair.type, credit: o.pair.credit, common: o.pair.common ? o.pair.common.name : '', h1: classText(o.pair.halves[0]) });
           BS.dirty = true; close(); drawSet(t, body);
-          toast('묶음을 넣었습니다. [다시 자동 편성]을 눌러 주세요.');
+          toast('교차 편성을 넣었습니다. [다시 자동 편성]을 눌러 주세요.');
           const sv = t.querySelector('#bsolve'); if (sv) sv.scrollIntoView({ block: 'center' });
         };
       });
@@ -408,7 +480,7 @@
       + '<div class="card tight"><div class="tbl-wrap bgrid-wrap"><table class="bgrid"><thead><tr><th>블록</th>' + cols.map((r) => '<th>' + esc(r) + (extraRooms.includes(r) ? ' <span class="no">?</span>' : '') + '</th>').join('') + (hasNone ? '<th>교실 미정</th>' : '') + '</tr></thead><tbody>'
       + res.blocks.map((b) => {
         const inB = res.sections.map((s, i) => [s, i]).filter((x) => x[0].block === b.id);
-        const cell = (list) => list.map(([s, i]) => '<button type="button" class="sec" data-sec="' + i + '" style="border-left-color:' + colorOf(s.group || s.subject) + '"><b>' + esc(s.subject) + '</b><small>' + esc(s.label) + ' · ' + s.students.length + '명' + (s.teacherId ? ' · ' + esc(teacherName(s.teacherId)) : '') + '</small></button>').join('');
+        const cell = (list) => list.map(([s, i]) => '<button type="button" class="sec" data-sec="' + i + '" style="border-left-color:' + colorOf(s.group || s.subject) + '"><b>' + esc(s.subject) + '</b><small>' + esc(s.label) + ' · ' + s.students.length + '명' + (s.teacherId ? ' · ' + esc(teacherName(s.teacherId)) : '') + (s.teacherId2 ? '·' + esc(teacherName(s.teacherId2)) : '') + '</small></button>').join('');
         const note = blockNote(b), sl = b.slot || b.id, occ = busy.rooms[sl] || [];
         return '<tr' + (note ? ' class="paired"' : '') + '><th><b>' + esc(b.id) + '</b><br><span class="muted small">' + b.credit + '학점 · ' + inB.length + '반</span>' + (note ? '<br><span class="small pairnote">' + esc(note) + '</span>' : '') + '</th>'
           + cols.map((r) => '<td>' + (occ.includes(r) && !inB.some((x) => x[0].room === r) ? '<span class="occ">' + esc((busy.labels[sl] || {})[r] || '공통과목') + '</span>' : '') + cell(inB.filter((x) => x[0].room === r)) + '</td>').join('') + (hasNone ? '<td>' + cell(inB.filter((x) => !x[0].room)) + '</td>' : '') + '</tr>';
@@ -434,7 +506,7 @@
       const key = (s) => s.subject + '|' + s.block + '|' + s.no;
       const prev = {}; old.forEach((s) => { prev[key(s)] = s; });
       r.sections.forEach((s) => { const p = prev[key(s)]; if (p) { s.room = p.room; s.teacherId = p.teacherId; } });
-      r.blocks = res.blocks; r.pairs = res.pairs;
+      r.blocks = res.blocks; r.pairs = res.pairs; r.bundles = res.bundles;
       BK.assignRooms(r.sections, BS.rooms, true, r.blocks, slotBusy().rooms);
       BS.result = r; BS.dirty = true;
       toast(r.unassigned.length ? '배정하지 못한 학생 ' + r.unassigned.length + '명이 있습니다.' : '학생을 다시 배정했습니다.', !!r.unassigned.length);
@@ -448,12 +520,13 @@
     const usedRooms = {}; res.sections.forEach((x, k) => { if (k !== i && slotOf(x.block) === sl0 && x.room) usedRooms[x.room] = x; });
     const occRooms = slotBusy().rooms[sl0] || [];
     const ts = BS.d.teachers.slice().sort((a, b) => (b.subject === s.group) - (a.subject === s.group) || (a.name < b.name ? -1 : 1));
-    const busy = {}; res.sections.forEach((x, k) => { if (k !== i && slotOf(x.block) === sl0 && x.teacherId) busy[x.teacherId] = 1; });
+    const busy = {}; res.sections.forEach((x, k) => { if (k !== i && slotOf(x.block) === sl0) { if (x.teacherId) busy[x.teacherId] = 1; if (x.teacherId2) busy[x.teacherId2] = 1; } });
     const sm = stuById();
     modal('<h2>' + esc(s.subject) + ' ' + esc(s.label) + '</h2><p class="muted">' + s.credit + '학점 · ' + s.students.length + '명 · 정원과목 ' + esc(s.group || '-') + '</p>'
       + '<div class="grid2 tight2"><div class="field"><label for="es1">블록</label><select id="es1" class="input">' + blocks.map((b) => '<option value="' + esc(b.id) + '"' + (b.id === s.block ? ' selected' : '') + '>' + esc(b.id) + (blockNote(b) ? ' — ' + esc(blockNote(b)) : '') + '</option>').join('') + '</select></div>'
       + '<div class="field"><label for="es2">교실</label><select id="es2" class="input"><option value="">(미정)</option>' + BS.rooms.map((r) => '<option value="' + esc(r) + '"' + (r === s.room ? ' selected' : '') + (occRooms.includes(r) ? ' disabled' : '') + '>' + esc(r) + (occRooms.includes(r) ? ' (공통과목 학급 수업 중)' : usedRooms[r] ? ' — ' + esc(usedRooms[r].subject) + ' ' + esc(usedRooms[r].label) + '와 바꾸기' : '') + '</option>').join('') + '</select></div></div>'
       + '<div class="field"><label for="es3">교사</label><select id="es3" class="input"><option value="">(미정)</option>' + ts.map((x) => '<option value="' + esc(x.id) + '"' + (x.id === s.teacherId ? ' selected' : '') + (busy[x.id] ? ' disabled' : '') + '>' + esc(x.name) + (x.subject ? ' · ' + esc(x.subject) : '') + (busy[x.id] ? ' (이 시간 수업 있음)' : '') + '</option>').join('') + '</select></div>'
+      + (s.groups && s.groups.length > 1 ? '<div class="field"><label for="es4">둘째 교사 (' + esc(s.groups[1]) + ')</label><select id="es4" class="input"><option value="">(미정)</option>' + ts.slice().sort((a, b) => (b.subject === s.groups[1]) - (a.subject === s.groups[1])).map((x) => '<option value="' + esc(x.id) + '"' + (x.id === s.teacherId2 ? ' selected' : '') + (busy[x.id] ? ' disabled' : '') + '>' + esc(x.name) + (x.subject ? ' · ' + esc(x.subject) : '') + (busy[x.id] ? ' (이 시간 수업 있음)' : '') + '</option>').join('') + '</select></div>' : '')
       + '<details><summary>학생 ' + s.students.length + '명</summary><div class="small">' + s.students.map((id) => sm[id] ? esc(sm[id].grade + '-' + sm[id].classNo + ' ' + sm[id].name) : esc(id)).join(', ') + '</div></details>'
       + '<p class="hint">블록을 바꾸면 이 과목을 고른 학생들이 다시 배정됩니다.</p>'
       + '<div class="row" style="justify-content:flex-end"><button class="btn" id="esadd">같은 블록에 이 과목 분반 추가</button><span style="flex:1"></span><button class="btn" data-close>취소</button><button class="btn pri" id="esok">적용</button></div>', (bg, close) => {
@@ -464,6 +537,7 @@
       bg.querySelector('#esok').onclick = () => {
         const nb = bg.querySelector('#es1').value, nr = bg.querySelector('#es2').value, nt = bg.querySelector('#es3').value;
         s.teacherId = nt;
+        const t2 = bg.querySelector('#es4'); if (t2) s.teacherId2 = t2.value;
         if (nr !== s.room) { const other = usedRooms[nr]; if (other) other.room = s.room; s.room = nr; }
         BS.dirty = true; close();
         if (nb !== s.block) { s.block = nb; s.room = ''; reassign(null, body); } else draw(body);
@@ -477,7 +551,8 @@
     const res = BS.result, where = {};
     res.sections.forEach((s) => s.students.forEach((id) => { (where[id] = where[id] || {})[s.block] = s; }));
     const list = included().slice().sort((a, b) => Number(a.classNo) - Number(b.classNo) || Number(a.number) - Number(b.number));
-    const bad = (s) => { const w = where[s.id] || {}; const got = Object.values(w).map((x) => x.subject); return s.picks.some((p) => !got.includes(p)); };
+    const gotOf = (s) => [].concat(...Object.values(where[s.id] || {}).map((x) => partsOf(x.subject)));
+    const bad = (s) => { const got = gotOf(s); return s.picks.some((p) => !got.includes(p)); };
     const ui = A.ui;
     const classes = Array.from(new Set(list.map((s) => s.classNo))).sort((a, b) => a - b);
     t.innerHTML = '<div class="card tight"><div class="row"><input id="bsq" class="input sm" placeholder="이름·학번 찾기" value="' + esc(ui.bsq || '') + '"><select id="bsc" class="input sm"><option value="">모든 반</option><option value="bad"' + (ui.bsc === 'bad' ? ' selected' : '') + '>문제 있는 학생</option>'
@@ -492,7 +567,7 @@
         const w = where[s.id] || {}, b0 = bad(s);
         return '<tr' + (b0 ? ' class="badrow"' : '') + '><td>' + esc(s.classNo) + '</td><td>' + esc(s.number) + '</td><td>' + esc(s.name) + '</td>'
           + res.blocks.map((b) => '<td class="small">' + (w[b.id] ? esc(w[b.id].subject) + ' <span class="muted">' + esc(w[b.id].label) + (w[b.id].room ? ' · ' + esc(w[b.id].room) : '') + '</span>' : '') + '</td>').join('')
-          + '<td class="small">' + (b0 ? '<span class="no">미배정: ' + esc(s.picks.filter((p) => !Object.values(w).some((x) => x.subject === p)).join(', ')) + '</span>' : '') + '</td></tr>';
+          + '<td class="small">' + (b0 ? '<span class="no">미배정: ' + esc(s.picks.filter((p) => !gotOf(s).includes(p)).join(', ')) + '</span>' : '') + '</td></tr>';
       }).join('');
     };
     t.querySelector('#bsq').oninput = fill; t.querySelector('#bsc').onchange = fill; fill();
@@ -522,7 +597,7 @@
     const grpPick = {};
     included().forEach((s) => { const m = {}; s.picks.forEach((p) => { const o = elect.find((x) => x.name === p); if (o) m[o.group] = (m[o.group] || 0) + 1; }); Object.keys(m).forEach((g) => { grpPick[g] = Math.max(grpPick[g] || 0, m[g]); }); });
     const where = {};
-    res.sections.forEach((s) => s.students.forEach((id) => { (where[id] = where[id] || {})[s.subject] = s.label; }));
+    res.sections.forEach((s) => s.students.forEach((id) => { partsOf(s.subject).forEach((p) => { (where[id] = where[id] || {})[p] = s.label; }); }));
     const h1 = ['순번', '학번', '이름', '성별', '반', '번호'], h2 = ['', '', '', '', '', ''];
     let lastG = null;
     elect.forEach((o) => { h1.push(o.group !== lastG ? term + '학기[택' + (grpPick[o.group] || 1) + ']' : ''); h2.push(o.name); lastG = o.group; });
@@ -586,11 +661,11 @@
       const sum = {};
       rows.forEach((r) => { const k = r[2] || '(미정)'; sum[k] = (sum[k] || 0) + r[7]; });
       const tcount = {}; d.teachers.forEach((x) => { if (x.subject) tcount[x.subject] = (tcount[x.subject] || 0) + 1; });
-      v.innerHTML = '<div class="card tight"><div class="row"><h2>교원소요 배당표</h2><label class="row small">학년도 <input id="dmy" class="input sm w4" value="' + esc(d.year) + '"></label><span style="margin-left:auto"></span><button class="btn pri sm" id="dmx">엑셀 내려받기</button></div>'
+      v.innerHTML = '<div class="card tight"><div class="row"><h2>교원소요 배당표</h2><label class="row small">학년도 <input id="dmy" class="input sm w4" value="' + esc(d.year) + '"></label>' + (A.yearTag(d.year) ? '<span class="pill">' + A.yearTag(d.year) + '</span>' : '') + '<span style="margin-left:auto"></span><button class="btn pri sm" id="dmx">엑셀 내려받기</button></div>'
         + '<table class="mini edit"><thead><tr><th>학년</th><th>입학년도</th><th>학급 수</th><th>교육과정</th><th>선택 과목 분반 수</th></tr></thead><tbody>'
         + d.grades.map((g) => {
           const ps = d.plans.filter((p) => String(p.grade) === String(g.grade));
-          return '<tr><td>' + g.grade + '학년</td><td>' + esc(g.cohort) + '</td><td><input class="input sm w4" data-cl="' + g.grade + '" value="' + esc(classes[g.grade]) + '"> <span class="muted small">' + esc(g.from || '') + '</span></td>'
+          return '<tr><td>' + esc(A.gradeLabel(d.year, g.grade)) + '</td><td>' + esc(g.cohort) + '</td><td><input class="input sm w4" data-cl="' + g.grade + '" value="' + esc(classes[g.grade]) + '"> <span class="muted small">' + esc(g.from || '') + '</span></td>'
             + '<td>' + (g.hasCur ? '<span class="okk">✓</span>' : '<span class="no">없음</span>') + '</td><td class="small">' + ([1, 2].map((tm) => { const p = ps.find((x) => String(x.sem) === String(tm)); return tm + '학기: ' + (p ? '블록 편성(' + esc(p.status) + ')' : '신청 인원으로 어림'); }).join(' · ')) + '</td></tr>';
         }).join('') + '</tbody></table>'
         + ((d.surveyOnly || []).length ? '<div class="note">아직 신청이 없는 학기는 참고조사(수요조사) 인원으로 어림했습니다: ' + esc(d.surveyOnly.map((k) => { const [y, sm] = k.split('|'); return y + ' 입학 ' + sm.replace('-', '학년 ') + '학기'; }).join(', ')) + '</div>' : '')
